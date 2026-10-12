@@ -1,0 +1,435 @@
+//@version=6
+indicator("AMD Range Model", overlay = true, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
+
+// ───────────────────────── inputs
+rngPts   = input.float(120, "Show zones within (points)", minval = 1)
+runPts   = input.float(30, "Hide IFVG once price runs away (points)", minval = 1)
+ifvg1Min = input.int(7, "Keep 1m IFVG for (minutes)", minval = 1)
+showPlan = input.bool(true, "Trade plan (entry / stop / targets)")
+showTbl  = input.bool(true, "Panel")
+grpG = "GEX levels on THIS chart's prices (0 = off)"
+gCW = input.float(0, "Call Wall", group = grpG)
+gPW = input.float(0, "Put Wall", group = grpG)
+gFL = input.float(0, "Gamma Flip", group = grpG)
+gP1 = input.float(0, "GEX Pivot 1", group = grpG)
+gP2 = input.float(0, "GEX Pivot 2", group = grpG)
+
+TZ = "America/New_York"
+cBull = color.new(#26a69a, 0)
+cBear = color.new(#ef5350, 0)
+
+// ───────────────────────── higher-timeframe detector (closed candles only: everything is read one bar back)
+// returns: IFVG inversion on the last closed bar, rejection block confirmed on the last closed bar, key-open RB, bar id
+htf() =>
+    var array<float> fT = array.new<float>()
+    var array<float> fB = array.new<float>()
+    var array<int>   fD = array.new<int>()
+    var array<int>   fTm = array.new<int>()
+    // key opens of the current NY day (18:00 start)
+    var array<float> ko = array.new<float>()
+    nyH = hour(time[1], TZ)
+    nyM = minute(time[1], TZ)
+    if nyH == 18 and nyM == 0
+        ko.clear()
+    if (nyH == 18 and nyM == 0) or (nyH == 0 and nyM == 0) or (nyH == 2 and nyM == 0) or (nyH == 8 and nyM == 30) or (nyH == 9 and nyM == 30) or (nyH == 10 and nyM == 0) or (nyH == 13 and nyM == 30)
+        ko.push(open[1])
+    // IFVG: a gap closed through by the last closed candle
+    invD = 0
+    invT = float(na)
+    invB = float(na)
+    invTm = 0
+    if fD.size() > 0
+        for i = fD.size() - 1 to 0
+            d = fD.get(i)
+            if (d == 1 and close[1] < fB.get(i)) or (d == -1 and close[1] > fT.get(i))
+                if invD == 0
+                    invD := -d
+                    invT := fT.get(i)
+                    invB := fB.get(i)
+                    invTm := fTm.get(i)
+                fT.remove(i)
+                fB.remove(i)
+                fD.remove(i)
+                fTm.remove(i)
+    // new gap made by the last three closed candles (skip session gaps)
+    contiguous = (time[1] - time[3]) <= 2 * timeframe.in_seconds() * 1000
+    if contiguous and low[1] > high[3]
+        fT.push(low[1]), fB.push(high[3]), fD.push(1), fTm.push(time[3])
+    if contiguous and high[1] < low[3]
+        fT.push(low[3]), fB.push(high[1]), fD.push(-1), fTm.push(time[3])
+    while fD.size() > 60
+        fT.shift(), fB.shift(), fD.shift(), fTm.shift()
+    // rejection block: swing candle [3] with 2 closed candles each side, wick ≥ 30% of its range
+    r3 = high[3] - low[3]
+    isPL = low[3] < low[4] and low[3] < low[5] and low[3] <= low[2] and low[3] <= low[1]
+    isPH = high[3] > high[4] and high[3] > high[5] and high[3] >= high[2] and high[3] >= high[1]
+    rbD = 0
+    rbT = float(na)
+    rbB = float(na)
+    if isPL and r3 > 0 and (math.min(open[3], close[3]) - low[3]) >= 0.3 * r3
+        rbD := 1, rbT := math.min(open[3], close[3]), rbB := low[3]
+    else if isPH and r3 > 0 and (high[3] - math.max(open[3], close[3])) >= 0.3 * r3
+        rbD := -1, rbT := high[3], rbB := math.max(open[3], close[3])
+    // key-open rejection block on the last closed candle
+    kD = 0
+    kT = float(na)
+    kB = float(na)
+    rg = high[1] - low[1]
+    bodyHi = math.max(open[1], close[1])
+    bodyLo = math.min(open[1], close[1])
+    up = high[1] - bodyHi
+    dn = bodyLo - low[1]
+    if ko.size() > 0 and rg > 0
+        for k in ko
+            if high[1] >= k and bodyHi < k and up >= 0.4 * rg and up >= bodyHi - bodyLo and up > dn
+                kD := -1, kT := high[1], kB := bodyHi
+            if low[1] <= k and bodyLo > k and dn >= 0.4 * rg and dn >= bodyHi - bodyLo and dn > up
+                kD := 1, kT := bodyLo, kB := low[1]
+    [invD, invT, invB, invTm, time[1], rbD, rbT, rbB, time[3], kD, kT, kB, time[1]]
+
+// market structure: last close through a confirmed 2/2 swing
+structure() =>
+    var float hi = na
+    var float lo = na
+    var int trend = 0
+    ph = ta.pivothigh(high, 2, 2)
+    pl = ta.pivotlow(low, 2, 2)
+    if not na(ph)
+        hi := ph
+    if not na(pl)
+        lo := pl
+    ev = 0
+    lvl = float(na)
+    if not na(hi) and close > hi
+        ev := 1, lvl := hi, trend := 1, hi := na
+    if not na(lo) and close < lo
+        ev := -1, lvl := lo, trend := -1, lo := na
+    [trend, ev, lvl, math.abs(close - open), ta.atr(14), close, nz(ta.valuewhen(not na(ph), ph, 0)), nz(ta.valuewhen(not na(pl), pl, 0)), time]
+
+// ───────────────────────── zone store
+type Zone
+    float top
+    float bot
+    int   dir
+    int   t
+    string tf
+    string kind
+    int   tInv
+    int   addBar
+
+var array<Zone> zones = array.new<Zone>()
+
+addZone(top, bot, dir, t, tf, kind, tInv) =>
+    if not na(top) and not na(bot) and top > bot
+        zones.push(Zone.new(top, bot, dir, t, tf, kind, tInv, bar_index))
+
+tfs = array.from("1", "5", "15", "60", "240", "D")
+lbl = array.from("1m", "5m", "15m", "1H", "4H", "1D")
+
+[i1D, i1T, i1B, i1Tm, i1At, r1D, r1T, r1B, r1Tm, k1D, k1T, k1B, b1] = request.security(syminfo.tickerid, "1", htf(), lookahead = barmerge.lookahead_on)
+[i5D, i5T, i5B, i5Tm, i5At, r5D, r5T, r5B, r5Tm, k5D, k5T, k5B, b5] = request.security(syminfo.tickerid, "5", htf(), lookahead = barmerge.lookahead_on)
+[iFD, iFT, iFB, iFTm, iFAt, rFD, rFT, rFB, rFTm, kFD, kFT, kFB, bF] = request.security(syminfo.tickerid, "15", htf(), lookahead = barmerge.lookahead_on)
+[iHD, iHT, iHB, iHTm, iHAt, _rh1, _rh2, _rh3, _rh4, _rh5, _rh6, _rh7, bH] = request.security(syminfo.tickerid, "60", htf(), lookahead = barmerge.lookahead_on)
+[i4D, i4T, i4B, i4Tm, i4At, _r41, _r42, _r43, _r44, _r45, _r46, _r47, b4] = request.security(syminfo.tickerid, "240", htf(), lookahead = barmerge.lookahead_on)
+[iDD, iDT, iDB, iDTm, iDAt, _rd1, _rd2, _rd3, _rd4, _rd5, _rd6, _rd7, bD] = request.security(syminfo.tickerid, "D", htf(), lookahead = barmerge.lookahead_on)
+
+// new closed higher-timeframe candle → record what it produced
+if b1 != b1[1] and i1D != 0
+    addZone(i1T, i1B, i1D, i1Tm, "1m", "IFVG", i1At)
+if b5 != b5[1]
+    if i5D != 0
+        addZone(i5T, i5B, i5D, i5Tm, "5m", "IFVG", i5At)
+    if r5D != 0
+        addZone(r5T, r5B, r5D, r5Tm, "5m", "RB", r5Tm)
+    if k5D != 0
+        addZone(k5T, k5B, k5D, b5, "5m", "KO RB", b5)
+if bF != bF[1]
+    if iFD != 0
+        addZone(iFT, iFB, iFD, iFTm, "15m", "IFVG", iFAt)
+    if rFD != 0
+        addZone(rFT, rFB, rFD, rFTm, "15m", "RB", rFTm)
+    if kFD != 0
+        addZone(kFT, kFB, kFD, bF, "15m", "KO RB", bF)
+if bH != bH[1] and iHD != 0
+    addZone(iHT, iHB, iHD, iHTm, "1H", "IFVG", iHAt)
+if b4 != b4[1] and i4D != 0
+    addZone(i4T, i4B, i4D, i4Tm, "4H", "IFVG", i4At)
+if bD != bD[1] and iDD != 0
+    addZone(iDT, iDB, iDD, iDTm, "1D", "IFVG", iDAt)
+
+// mitigation: any touch after the zone exists removes it; IFVGs also go once price runs away
+if zones.size() > 0
+    for i = zones.size() - 1 to 0
+        z = zones.get(i)
+        touched = bar_index > z.addBar and (z.dir > 0 ? low <= z.top : high >= z.bot)
+        dist = math.max(0, z.bot - close, close - z.top)
+        away = z.kind == "IFVG" and dist > math.max(runPts, 3 * (z.top - z.bot))
+        stale1m = z.tf == "1m" and (time - z.tInv) > ifvg1Min * 60000
+        if touched or away or stale1m
+            zones.remove(i)
+while zones.size() > 400
+    zones.shift()
+
+// ───────────────────────── key opens (NY)
+var float koMid = na
+var float ko18 = na
+var array<float> koP = array.new<float>()
+var array<int>   koT = array.new<int>()
+var array<string> koN = array.new<string>()
+nyHr = hour(time, TZ)
+nyMn = minute(time, TZ)
+newDay = nyHr == 18 and nyMn == 0 and not (hour(time[1], TZ) == 18 and minute(time[1], TZ) == 0)
+if newDay
+    koP.clear(), koT.clear(), koN.clear()
+    ko18 := open
+    koMid := na
+koName = nyHr == 18 and nyMn == 0 ? "18:00" : nyHr == 0 and nyMn == 0 ? "00:00" : nyHr == 2 and nyMn == 0 ? "02:00" : nyHr == 8 and nyMn == 30 ? "08:30" : nyHr == 9 and nyMn == 30 ? "09:30" : nyHr == 10 and nyMn == 0 ? "10:00" : nyHr == 13 and nyMn == 30 ? "13:30" : ""
+if koName != "" and (koN.size() == 0 or koN.last() != koName)
+    koP.push(open), koT.push(time), koN.push(koName)
+    if koName == "00:00"
+        koMid := open
+refOpen = na(koMid) ? ko18 : koMid
+
+// ───────────────────────── market structure + daily bias (flips only with precautions)
+[t4, e4, l4, _b4, _a4, _c4, _h4, _lo4, _t4] = request.security(syminfo.tickerid, "240", structure(), lookahead = barmerge.lookahead_off)
+[t1, e1, l1, _b1, _a1, _c1, sh1, sl1, _tt1] = request.security(syminfo.tickerid, "60", structure(), lookahead = barmerge.lookahead_off)
+[t15, e15, lv15, body15, atr15, c15, sh15, sl15, tm15] = request.security(syminfo.tickerid, "15", structure(), lookahead = barmerge.lookahead_off)
+var int bias = 0
+var int pendDir = 0
+var float pendLvl = na
+var bool pendSide = false
+var int flipT = 0
+var string why = ""
+if newDay or bias == 0
+    bias := t4 != 0 ? t4 : t1 != 0 ? t1 : 1
+    why := "set by " + (t4 != 0 ? "4H" : "1H") + " structure"
+new15 = tm15 != tm15[1]
+if new15
+    // confirm a pending flip: the next 15m candle must hold beyond the broken level
+    if pendDir != 0
+        if (pendDir > 0 ? c15[1] > pendLvl : c15[1] < pendLvl) and pendSide
+            bias := pendDir
+            flipT := time
+            why := "flipped: 15m MSS + displacement, held, " + (pendDir > 0 ? "above" : "below") + " open"
+        pendDir := 0
+    if e15[1] != 0 and e15[1] != bias and body15[1] >= atr15[1]
+        pendDir := e15[1]
+        pendLvl := lv15[1]
+        pendSide := na(refOpen) or (e15[1] > 0 ? c15[1] > refOpen : c15[1] < refOpen)
+
+// ───────────────────────── nearest CISD (chart timeframe)
+var float runOpenDn = na
+var float runOpenUp = na
+var array<float> cisL = array.new<float>()
+var array<int>   cisD = array.new<int>()
+var array<int>   cisT = array.new<int>()
+if close < open and not (close[1] < open[1])
+    runOpenDn := open
+if close > open and not (close[1] > open[1])
+    runOpenUp := open
+if not na(runOpenDn) and close > runOpenDn and close[1] <= runOpenDn
+    cisL.push(runOpenDn), cisD.push(1), cisT.push(time)
+    runOpenDn := na
+if not na(runOpenUp) and close < runOpenUp and close[1] >= runOpenUp
+    cisL.push(runOpenUp), cisD.push(-1), cisT.push(time)
+    runOpenUp := na
+while cisL.size() > 10
+    cisL.shift(), cisD.shift(), cisT.shift()
+
+// ───────────────────────── trade plan (one at a time) + track record over the chart's history
+var int    trDir = 0
+var string trSt = ""
+var float  trEn = na
+var float  trSl = na
+var float  trT1 = na
+var float  trT2 = na
+var bool   trBE = false
+var bool   trT1hit = false
+var int    trT = 0
+var string trConf = ""
+var int    trScore = 0
+var float  trRR = na
+var int    wins = 0
+var int    losses = 0
+var string lastRes = ""
+tick = syminfo.mintick
+gexArr = array.from(gCW, gPW, gFL, gP1, gP2)
+
+if showPlan
+    // manage the open trade
+    if trDir != 0
+        if trSt == "LIMIT"
+            if (trDir > 0 ? high >= trT2 : low <= trT2) or (time - trT) > 4 * 3600000 or trDir != bias or math.abs(trEn - close) > rngPts
+                trDir := 0, lastRes := "cancelled"
+            else if trDir > 0 ? low <= trEn : high >= trEn
+                trSt := "IN TRADE"
+        if trDir != 0 and trSt == "IN TRADE"
+            sl = trBE ? trEn : trSl
+            if trDir > 0 ? low <= sl : high >= sl
+                if trBE
+                    wins += 1
+                    lastRes := "BE after TP1"
+                else
+                    losses += 1
+                    lastRes := "stopped"
+                trDir := 0
+            else
+                if not trT1hit and (trDir > 0 ? high >= trT1 : low <= trT1)
+                    trT1hit := true, trBE := true
+                if trDir > 0 ? high >= trT2 : low <= trT2
+                    wins += 1
+                    lastRes := "TP2 hit"
+                    trDir := 0
+    // look for a new one: stacked zones in the bias direction, near price, 2.5R+, A grade
+    if trDir == 0 and barstate.isconfirmed and zones.size() > 0
+        bestScore = 0
+        bestRR = 0.0
+        float bEn = na
+        float bSl = na
+        float bT1 = na
+        float bT2 = na
+        string bConf = ""
+        buf = math.max(close * 0.0003, tick * 4)
+        for z in zones
+            if z.dir == bias and (bias > 0 ? z.top < close : z.bot > close)
+                en = math.round_to_mintick(bias > 0 ? z.top : z.bot)
+                if math.abs(en - close) <= rngPts / 3
+                    far = bias > 0 ? z.bot : z.top
+                    conf = ""
+                    n = 0
+                    htfOk = false
+                    for o in zones
+                        if o.dir == bias and math.min(o.top, z.top) > math.max(o.bot, z.bot)
+                            far := bias > 0 ? math.min(far, o.bot) : math.max(far, o.top)
+                            tag = o.tf + " " + o.kind
+                            if not str.contains(conf, tag)
+                                conf := conf + (conf == "" ? "" : " + ") + tag
+                                n += 1
+                            if o.tf == "15m" or o.tf == "1H" or o.tf == "4H" or o.tf == "1D"
+                                htfOk := true
+                    sl = math.round_to_mintick(far - bias * buf)
+                    R = math.abs(en - sl)
+                    if R >= tick * 8 and R <= rngPts * 0.6
+                        // targets: first real level ≥1.5R / ≥3R (opposite zones, GEX, key opens, 15m/1H swings)
+                        float tg1 = na
+                        float tg2 = na
+                        pool = array.new<float>()
+                        for o in zones
+                            if o.dir == -bias
+                                pool.push(bias > 0 ? o.bot : o.top)
+                        for g in gexArr
+                            if g > 0
+                                pool.push(g)
+                        for k in koP
+                            pool.push(k)
+                        pool.push(bias > 0 ? sh15 : sl15), pool.push(bias > 0 ? sh1 : sl1)
+                        best1 = 1e12
+                        best2 = 1e12
+                        for p in pool
+                            dd = bias * (p - en)
+                            if dd >= 1.5 * R and dd < best1
+                                best1 := dd, tg1 := p
+                            if dd >= 3 * R and dd < best2
+                                best2 := dd, tg2 := p
+                        tg1 := na(tg1) ? en + bias * 1.5 * R : tg1
+                        tg2 := na(tg2) ? en + bias * 3 * R : tg2
+                        rr = math.abs(tg2 - en) / R
+                        gexHere = false
+                        for g in gexArr
+                            if g > 0 and g <= math.max(en, sl) + buf and g >= math.min(en, sl) - buf
+                                gexHere := true
+                        pd = not na(refOpen) and (bias > 0 ? en < refOpen : en > refOpen)
+                        s1ok = t1 == bias
+                        score = n + (htfOk ? 1 : 0) + (gexHere ? 1 : 0) + (pd ? 1 : 0) + (s1ok ? 1 : 0)
+                        if score >= 5 and rr >= 2.5 and htfOk and pd and s1ok and (score > bestScore or (score == bestScore and rr > bestRR))
+                            bestScore := score, bestRR := rr, bEn := en, bSl := sl, bT1 := math.round_to_mintick(tg1), bT2 := math.round_to_mintick(tg2), bConf := conf + (gexHere ? " + GEX" : "") + (pd ? (bias > 0 ? " + discount" : " + premium") : "")
+        if bestScore > 0
+            trDir := bias, trSt := "LIMIT", trEn := bEn, trSl := bSl, trT1 := bT1, trT2 := bT2, trBE := false, trT1hit := false, trT := time, trConf := bConf, trScore := bestScore, trRR := bestRR
+
+// ───────────────────────── drawing (last bar only, rebuilt each update)
+var array<box>   bxs = array.new<box>()
+var array<line>  lns = array.new<line>()
+var array<label> lbs = array.new<label>()
+if barstate.islast
+    for b in bxs
+        b.delete()
+    for l in lns
+        l.delete()
+    for l in lbs
+        l.delete()
+    bxs.clear(), lns.clear(), lbs.clear()
+    // zones (only the newest 1m IFVG)
+    int newest1m = -1
+    for [i, z] in zones
+        if z.tf == "1m"
+            newest1m := i
+    for [i, z] in zones
+        if (z.tf != "1m" or i == newest1m) and math.max(0, z.bot - close, close - z.top) <= rngPts
+            c = z.dir > 0 ? cBull : cBear
+            bxs.push(box.new(z.t, z.top, time + 5 * timeframe.in_seconds() * 1000, z.bot, xloc = xloc.bar_time, border_color = c, bgcolor = color.new(c, 85), text = z.tf + " " + (z.dir > 0 ? "Bullish " : "Bearish ") + z.kind, text_color = c, text_size = size.small, text_halign = text.align_left, text_valign = text.align_top))
+    // key opens within range
+    for [i, p] in koP
+        if math.abs(p - close) <= rngPts
+            lns.push(line.new(koT.get(i), p, time, p, xloc = xloc.bar_time, color = color.gray, style = line.style_dotted))
+            lbs.push(label.new(koT.get(i), p, koN.get(i) + " Open", xloc = xloc.bar_time, style = label.style_none, textcolor = color.gray, size = size.small))
+    // nearest CISD
+    if cisL.size() > 0
+        bi = 0
+        for [i, v] in cisL
+            if math.abs(v - close) < math.abs(cisL.get(bi) - close)
+                bi := i
+        cc = cisD.get(bi) > 0 ? cBull : cBear
+        lns.push(line.new(cisT.get(bi) - 5 * timeframe.in_seconds() * 1000, cisL.get(bi), cisT.get(bi), cisL.get(bi), xloc = xloc.bar_time, color = cc, style = line.style_dashed))
+        lbs.push(label.new(cisT.get(bi), cisL.get(bi), timeframe.period + " " + (cisD.get(bi) > 0 ? "Bullish" : "Bearish") + " CISD", xloc = xloc.bar_time, style = label.style_none, textcolor = cc, size = size.small))
+    // GEX levels (always shown), tagged L / S
+    gN = array.from("Call Wall", "Put Wall", "Gamma Flip", "GEX Pivot", "GEX Pivot")
+    gC = array.from(cBear, cBull, color.yellow, color.silver, color.silver)
+    for [i, g] in gexArr
+        if g > 0
+            lns.push(line.new(bar_index - 1, g, bar_index, g, extend = extend.both, color = gC.get(i), width = 2))
+            lbs.push(label.new(bar_index + 3, g, (g >= close ? "S · " : "L · ") + gN.get(i), style = label.style_none, textcolor = gC.get(i), size = size.small))
+    // trade lines
+    if showPlan and trDir != 0
+        side = trDir > 0 ? "Long" : "Short"
+        for [i, p] in array.from(trEn, trBE ? trEn : trSl, trT1, trT2)
+            if not (i == 2 and trT1hit)
+                cl = i == 0 ? color.white : i == 1 ? cBear : color.lime
+                nm = i == 0 ? "AMD " + side + " Entry" : i == 1 ? (trBE ? "AMD SL (BE)" : "AMD SL") : i == 2 ? "AMD TP1" : "AMD TP2"
+                lns.push(line.new(trT, p, time + 10 * timeframe.in_seconds() * 1000, p, xloc = xloc.bar_time, color = cl, width = 2))
+                lbs.push(label.new(time + 10 * timeframe.in_seconds() * 1000, p, nm, xloc = xloc.bar_time, style = label.style_label_left, color = color.new(cl, 80), textcolor = cl, size = size.small))
+
+// ───────────────────────── panel
+var table tb = table.new(position.top_right, 2, 16, bgcolor = color.new(#11151c, 5), border_width = 1, border_color = color.new(#262d3a, 0))
+row(r, a, b, c) =>
+    table.cell(tb, 0, r, a, text_color = color.new(#8a93a6, 0), text_size = size.small, text_halign = text.align_left)
+    table.cell(tb, 1, r, b, text_color = c, text_size = size.small, text_halign = text.align_right)
+sname(t) =>
+    t > 0 ? "Bullish" : t < 0 ? "Bearish" : "—"
+scol(t) =>
+    t > 0 ? cBull : t < 0 ? cBear : color.gray
+if showTbl and barstate.islast
+    table.clear(tb, 0, 0, 1, 15)
+    table.cell(tb, 0, 0, "AMD Range Model", text_color = color.new(#26c6da, 0), text_size = size.normal, text_halign = text.align_left)
+    table.cell(tb, 1, 0, (bias > 0 ? "BULLISH" : "BEARISH") + " bias", text_color = bias > 0 ? cBull : cBear, text_size = size.normal)
+    row(1, "Why", why, color.gray)
+    row(2, "4H", sname(t4), scol(t4))
+    row(3, "1H", sname(t1), scol(t1))
+    row(4, "15m", sname(t15), scol(t15))
+    row(5, "Flips if", "15m close " + (bias > 0 ? "below " + str.tostring(sl15, format.mintick) : "above " + str.tostring(sh15, format.mintick)) + " w/ displacement, held", color.gray)
+    if gFL > 0
+        row(6, "Gamma", (close >= gFL ? "Positive · walls hold" : "Negative · moves expand"), close >= gFL ? cBull : cBear)
+    else
+        row(6, "Gamma", "enter GEX levels in settings", color.gray)
+    if trDir != 0
+        row(7, "Trade", (trDir > 0 ? "LONG · " : "SHORT · ") + trSt + " · score " + str.tostring(trScore), trDir > 0 ? cBull : cBear)
+        row(8, "Entry", str.tostring(trEn, format.mintick), color.white)
+        row(9, "Stop" + (trBE ? " (BE)" : ""), str.tostring(trBE ? trEn : trSl, format.mintick), cBear)
+        row(10, "TP1", str.tostring(trT1, format.mintick) + (trT1hit ? " ✓" : ""), color.lime)
+        row(11, "TP2", str.tostring(trT2, format.mintick), color.lime)
+        row(12, "R:R", str.tostring(trRR, "#.0") + "R", color.white)
+        row(13, "Confluence", trConf, color.gray)
+    else
+        row(7, "Trade", "no A-grade setup near price", color.gray)
+    n = wins + losses
+    row(14, "Track record", n > 0 ? str.tostring(wins) + "W – " + str.tostring(losses) + "L (" + str.tostring(math.round(100.0 * wins / n)) + "% reach TP1)" : "no closed trades on this chart yet", color.gray)
+    row(15, "Last", lastRes, color.gray)
