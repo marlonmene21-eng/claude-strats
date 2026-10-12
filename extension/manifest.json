@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Strat Buttons",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "PO3 Watch, Scriv Model, ICT Killzones and AMD Range Model on TradingView, TopstepX and Vest charts.",
   "action": { "default_popup": "popup.html", "default_title": "Strat Buttons" },
   "permissions": ["scripting", "activeTab"],
