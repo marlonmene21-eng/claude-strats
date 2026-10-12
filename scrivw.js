@@ -101,6 +101,7 @@ window.__claudeCore({
           if (hit >= tps.length) { st = 'done'; break; }
         }
       }
+      if ((st === 'pending' || st === 'active') && now - startT > 3600e3) st = 'cleared (1h old)';   // wipe trades an hour after they were posted
       if (st === 'pending') plan(now);
       if (!tps) { tps = [1, 2, 2.5].map(f => L1 + dir * f * rm).filter(p => dir > 0 ? p > entry : p < entry); if (tps.length < 2) { const R = Math.abs(entry - stop); while (tps.length < 3) tps.push(entry + dir * R * (tps.length + 1)); } }
       const exh = L1 + dir * 4 * rm;

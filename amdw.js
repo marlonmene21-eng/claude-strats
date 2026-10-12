@@ -2,7 +2,7 @@
 // Options GEX levels (call wall, put wall, gamma flip), FVGs, IFVGs, OBs, RBs, Powell key opens + KO RBs, recent CISDs. Chart timeframe.
 // NQ gamma: receive levels from the CBOE tab (sent by the 'GEX Update' bookmark), and open that tab when levels are stale
 if (!window.__claudeGexListen) { window.__claudeGexListen = 1; window.addEventListener('message', ev => { if (!/^https:\/\/[\w.-]*cboe\.com$/.test(ev.origin) || !ev.data || ev.data.type !== 'claude_gex') return; localStorage.setItem('claude_gex_raw', JSON.stringify({ ...ev.data, at: Date.now() })); window.__claude_amdw && window.__claude_amdw.tick(); }); }
-if (!window.__claude_amdw) { try { const sy = document.querySelector('iframe[id^="tradingview_"]').contentWindow.tradingViewApi.activeChart().symbol().toUpperCase(); const raw = JSON.parse(localStorage.getItem('claude_gex_raw') || 'null'); if (/NQ|NDX|NAS/.test(sy) && (!raw || Date.now() - raw.at > 6 * 3600e3)) window.open('https://cdn.cboe.com/api/global/delayed_quotes/options/_NDX.json', 'claude_cboe'); } catch (x) { } }
+if (!window.__claude_amdw) { try { const sy = document.querySelector('iframe[id^="tradingview_"]').contentWindow.tradingViewApi.activeChart().symbol().toUpperCase(); const raw = JSON.parse(localStorage.getItem('claude_gex_raw') || 'null'); if (/NQ|NDX|NAS/.test(sy) && (!raw || !raw.src || Date.now() - raw.at > 6 * 3600e3)) window.open('https://cdn.cboe.com/api/global/delayed_quotes/options/_NDX.json', 'claude_cboe'); } catch (x) { } }
 window.__claudeCore({
   key: 'claude_amdw', title: 'AMD Range Model', color: '#26c6da', pos: { top: 330, right: 330 },
   run: async function (e, H) {
@@ -34,9 +34,9 @@ window.__claudeCore({
           let ref = raw.ts - 15 * 60000; const p = H.etp(ref), wd = d => new Date(d + 'T12:00:00Z').getUTCDay();
           if (p.mins < 570 || p.mins >= 960 || wd(p.day) % 6 === 0) { let d = p.mins < 570 ? addDays(p.day, -1) : p.day; for (let k = 0; k < 4 && wd(d) % 6 === 0; k++) d = addDays(d, -1); ref = etMs(d, 16, 0) - 60000; }
           const nb = await H.bars(e, '1', ref - 10 * 60000), x = nb.filter(y => y.t <= ref).at(-1) || nb[0];
-          if (x) { const basis = x.c - raw.S, r = q => H.rt(e, q + basis); m = { asof: new Date(raw.at).toLocaleString(), rawAt: raw.at, basis, callWall: r(raw.cw), putWall: r(raw.pw), flip: raw.flip == null ? null : r(raw.flip), pivots: raw.piv.map(r), regime: raw.regime }; localStorage.setItem('claude_gex_nq', JSON.stringify(m)); }
+          if (x) { const basis = x.c - raw.S, r = q => H.rt(e, q + basis); m = { asof: new Date(raw.at).toLocaleString(), rawAt: raw.at, basis, callWall: r(raw.cw), putWall: r(raw.pw), flip: raw.flip == null ? null : r(raw.flip), pivots: raw.piv.map(r), regime: raw.regime, src: raw.src || 'NDX only (old method)', quoteAt: new Date(raw.ts).toLocaleString() }; localStorage.setItem('claude_gex_nq', JSON.stringify(m)); }
         }
-        if (m && /NQ|NDX|NAS/.test(sym)) return { cur: 'NDX', snap: m.asof, callWall: m.callWall, putWall: m.putWall, flip: m.flip, pivots: m.pivots, regime: m.regime }; return { err: 'No options-gamma levels loaded for ' + (e.sym || 'this symbol') }; }
+        if (m && /NQ|NDX|NAS/.test(sym)) return { cur: 'NDX', snap: (m.quoteAt || m.asof), src: m.src, callWall: m.callWall, putWall: m.putWall, flip: m.flip, pivots: m.pivots, regime: m.regime }; return { err: 'No options-gamma levels loaded for ' + (e.sym || 'this symbol') }; }
       const ck = window.__claudeGex || (window.__claudeGex = {});
       if (!ck[cur] || Date.now() - ck[cur].at > 5 * 60000) {
         const [bs, ix] = await Promise.all([
@@ -210,6 +210,7 @@ window.__claudeCore({
       }
       if (T.st === 'pending' && T.dir !== bias) T.st = 'cancelled (bias flipped)';
     }
+    for (const T of trades) if ((T.st === 'pending' || T.st === 'active') && B1.at(-1).t - T.created > 3600e3) T.st = 'cleared (1h old)';   // wipe trades an hour after they were posted
     for (const T of trades) if (T.st === 'pending' && Math.abs(T.entry - last) > TRN) T.st = 'cancelled (price moved away)';
     // track record: a win = TP1 reached (stop then sits at breakeven), a loss = full stop
     const stats = book[e.sym + '#stats'] || { w: 0, l: 0 };
@@ -282,7 +283,7 @@ window.__claudeCore({
       html += H.row((gex.callWall >= last ? 'S' : 'L') + ' · Call Wall', H.fmt(e, gex.callWall) + ' (' + dist(gex.callWall) + ')', '#ef5350');
       if (gex.flip != null) html += H.row((gex.flip >= last ? 'S' : 'L') + ' · Gamma Flip', H.fmt(e, gex.flip) + ' (' + dist(gex.flip) + ')', '#ffca28');
       html += H.row((gex.putWall >= last ? 'S' : 'L') + ' · Put Wall', H.fmt(e, gex.putWall) + ' (' + dist(gex.putWall) + ')', '#26a69a');
-      html += H.row('Source', gex.snap ? 'CBOE NDX options · ' + gex.snap + ' · mapped to NQ' : 'Deribit ' + gex.cur + ' options ≤60d, refreshed every 5 min');
+      html += H.row('Source', gex.snap ? 'CBOE ' + (gex.src || 'NDX') + ' options · quotes ' + gex.snap + ' · mapped to NQ' : 'Deribit ' + gex.cur + ' options ≤60d, refreshed every 5 min');
     }
     html += H.row('Zones', `${fvgs.length} FVG · ${ifvgs.length} IFVG · ${obs.length} OB · ${rbs.length} RB · ${korb.length} KO RB → ${shown.length} boxes`);
     html += H.hdr('Nearest zones', '#8a93a6');

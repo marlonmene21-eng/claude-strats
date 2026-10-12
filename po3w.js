@@ -73,6 +73,7 @@ window.__claudeCore({
         }
       }
       if (st === 'pending' && now >= f.end) st = 'expired';
+      if ((st === 'pending' || st === 'active') && now - m1[fv.i].t > 3600e3) st = 'cleared (1h old)';   // wipe trades an hour after they were posted
       return { f, st, O, ok, fv, entry, stop, R, t1, t2, tp1, fillT };
     }
 
