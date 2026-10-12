@@ -83,7 +83,9 @@ window.__claudeCore({
     }
 
     const res = frames.map(evalFrame);
-    const draws = [], live = res.filter(r => r.st === 'pending' || r.st === 'active');
+    const draws = [], live = [];
+    // same trade found by two frames (e.g. 18:00 1H and 18:00 4H) → show it once
+    for (const r of res.filter(r => r.st === 'pending' || r.st === 'active')) { const d = live.find(x => x.ok.dir === r.ok.dir && x.entry === r.entry && x.stop === r.stop); if (d) d.f = { ...d.f, name: d.f.name + ' + ' + r.f.name }; else live.push(r); }
     for (const r of live) {
       const d = r.ok.dir, col = d > 0 ? C.bull : C.bear, k = r.f.short, id = k + r.f.start;
       draws.push({ k: id + 'fvg', type: 'box', t1: r.fv.t, t2: now, top: r.fv.top, bot: r.fv.bot, col, ext: true, label: '1m ' + H.dirName(d) + ' FVG' });
