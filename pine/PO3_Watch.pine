@@ -1,0 +1,203 @@
+//@version=6
+indicator("PO3 Watch", overlay = true, max_boxes_count = 200, max_lines_count = 300, max_labels_count = 300)
+
+// Frames (NY time): NY AM from 9:30 (sweep in 40m, CISD by 10:30, fill by 12:00) and each 1H candle 07:00–11:00
+// (sweep in the first 20m, CISD by :30). Entry = near edge of the first FVG after the CISD, stop 0.03% beyond the
+// manipulation extreme, TP1 = nearest liquidity ≥1R, TP2 = nearest ≥2R. Use a 1m chart.
+showTbl = input.bool(true, "Panel")
+stopPct = input.float(0.03, "Stop buffer beyond extreme (%)", step = 0.01)
+TZ = "America/New_York"
+cBull = #26a69a
+cBear = #ef5350
+
+type Frame
+    string name
+    int    sH
+    int    sM
+    int    sweepMin
+    int    cisdMin
+    int    endMin
+    int    start = 0
+    float  O = na
+    float  extL = na
+    float  extH = na
+    float  lvlL = na
+    float  lvlH = na
+    int    dir = 0
+    float  cis = na
+    int    cisT = 0
+    float  fTop = na
+    float  fBot = na
+    int    fT = 0
+    float  en = na
+    float  sl = na
+    float  t1 = na
+    float  t2 = na
+    string t1n = ""
+    string t2n = ""
+    bool   tp1 = false
+    string st = "upcoming"
+
+mk(name, h, m, sw, cd, en) =>
+    Frame.new(name, h, m, sw, cd, en)
+
+var array<Frame> fr = array.from(mk("NY AM", 9, 30, 40, 60, 150), mk("7:00 1H", 7, 0, 20, 30, 60), mk("8:00 1H", 8, 0, 20, 30, 60), mk("9:00 1H", 9, 0, 20, 30, 60), mk("10:00 1H", 10, 0, 20, 30, 60), mk("11:00 1H", 11, 0, 20, 30, 60))
+
+nyH = hour(time, TZ)
+nyM = minute(time, TZ)
+mins = nyH * 60 + nyM
+newDay = nyH == 18 and nyM == 0 and not (hour(time[1], TZ) == 18 and minute(time[1], TZ) == 0)
+
+// session liquidity
+var float asiaH = na
+var float asiaL = na
+var float lonH = na
+var float lonL = na
+var float o830 = na
+var float hrH = na
+var float hrL = na
+var float pHrH = na
+var float pHrL = na
+if newDay
+    asiaH := na, asiaL := na, lonH := na, lonL := na, o830 := na
+if nyH >= 20
+    asiaH := na(asiaH) ? high : math.max(asiaH, high)
+    asiaL := na(asiaL) ? low : math.min(asiaL, low)
+if nyH >= 2 and nyH < 5
+    lonH := na(lonH) ? high : math.max(lonH, high)
+    lonL := na(lonL) ? low : math.min(lonL, low)
+if nyH == 8 and nyM == 30
+    o830 := open
+if nyM == 0
+    pHrH := hrH, pHrL := hrL, hrH := high, hrL := low
+else
+    hrH := na(hrH) ? high : math.max(hrH, high)
+    hrL := na(hrL) ? low : math.min(hrL, low)
+
+// run opens for CISD
+var float dnRun = na
+var float upRun = na
+if close < open and not (close[1] < open[1])
+    dnRun := open
+if close > open and not (close[1] > open[1])
+    upRun := open
+
+var int wins = 0
+var int losses = 0
+for f in fr
+    st0 = f.sH * 60 + f.sM
+    if newDay
+        f.start := 0, f.O := na, f.dir := 0, f.fTop := na, f.en := na, f.st := "upcoming", f.tp1 := false
+    rel = mins - st0
+    if rel == 0 and f.start == 0
+        f.start := time, f.O := open, f.extL := low, f.extH := high, f.lvlL := dnRun, f.lvlH := upRun, f.st := "watching"
+    if f.start != 0 and f.st != "done" and f.st != "stopped" and f.st != "expired" and f.st != "invalid" and f.st != "no setup"
+        if f.dir == 0
+            if rel < f.sweepMin
+                if low < f.extL
+                    f.extL := low, f.lvlL := close < open ? (na(dnRun) ? open : dnRun) : f.lvlL
+                if high > f.extH
+                    f.extH := high, f.lvlH := close > open ? (na(upRun) ? open : upRun) : f.lvlH
+            else if low < f.extL and high > f.extH
+                f.st := "no setup"
+            if rel <= f.cisdMin
+                if f.extL < f.O and not na(f.lvlL) and close > f.lvlL and low >= f.extL
+                    f.dir := 1, f.cis := f.lvlL, f.cisT := time, f.st := "CISD – wait FVG"
+                else if f.extH > f.O and not na(f.lvlH) and close < f.lvlH and high <= f.extH
+                    f.dir := -1, f.cis := f.lvlH, f.cisT := time, f.st := "CISD – wait FVG"
+            else if f.dir == 0
+                f.st := "no setup"
+        else if na(f.fTop)
+            if rel >= f.endMin
+                f.st := "no setup"
+            else if f.dir > 0 and low > high[2]
+                f.fTop := low, f.fBot := high[2], f.fT := time[2]
+            else if f.dir < 0 and high < low[2]
+                f.fTop := low[2], f.fBot := high, f.fT := time[2]
+            if not na(f.fTop)
+                ext = f.dir > 0 ? f.extL : f.extH
+                f.en := f.dir > 0 ? f.fTop : f.fBot
+                f.sl := math.round_to_mintick(ext * (1 - f.dir * stopPct / 100))
+                R = math.abs(f.en - f.sl)
+                names = array.from(f.name + " open", "8:30 open", "prior hour", "Asia", "London")
+                lv = array.from(f.O, o830, f.dir > 0 ? pHrH : pHrL, f.dir > 0 ? asiaH : asiaL, f.dir > 0 ? lonH : lonL)
+                b1 = 1e12
+                b2 = 1e12
+                f.t1 := na, f.t2 := na
+                for [i, p] in lv
+                    if not na(p)
+                        d = f.dir * (p - f.en)
+                        if d >= R and d < b1
+                            b1 := d, f.t1 := p, f.t1n := names.get(i)
+                        if d >= 2 * R and d < b2
+                            b2 := d, f.t2 := p, f.t2n := names.get(i)
+                if na(f.t1)
+                    f.t1 := f.en + f.dir * R, f.t1n := "1R"
+                if na(f.t2)
+                    f.t2 := f.en + f.dir * 2 * R, f.t2n := "2R"
+                f.st := "LIMIT"
+        else if f.st == "LIMIT"
+            ext = f.dir > 0 ? f.extL : f.extH
+            if rel >= f.endMin
+                f.st := "expired"
+            else if f.dir > 0 ? close < ext : close > ext
+                f.st := "invalid"
+            else if f.dir > 0 ? low <= f.en : high >= f.en
+                f.st := "IN TRADE"
+                if f.dir > 0 ? low <= f.sl : high >= f.sl
+                    f.st := "stopped", losses += 1
+        else if f.st == "IN TRADE"
+            if f.dir > 0 ? low <= f.sl : high >= f.sl
+                f.st := "stopped"
+                if f.tp1
+                    wins += 1
+                else
+                    losses += 1
+            else
+                if f.dir > 0 ? high >= f.t1 : low <= f.t1
+                    f.tp1 := true
+                if f.dir > 0 ? high >= f.t2 : low <= f.t2
+                    f.st := "done", wins += 1
+
+// drawing: only setups takeable right now
+var array<box> bx = array.new<box>()
+var array<line> ln = array.new<line>()
+var array<label> lb = array.new<label>()
+if barstate.islast
+    for b in bx
+        b.delete()
+    for l in ln
+        l.delete()
+    for l in lb
+        l.delete()
+    bx.clear(), ln.clear(), lb.clear()
+    fut = time + 15 * 60000
+    for f in fr
+        if f.st == "LIMIT" or f.st == "IN TRADE"
+            c = f.dir > 0 ? cBull : cBear
+            dn = f.dir > 0 ? "Bullish" : "Bearish"
+            bx.push(box.new(f.fT, f.fTop, fut, f.fBot, xloc = xloc.bar_time, border_color = c, bgcolor = color.new(c, 85), text = "1m " + dn + " FVG", text_color = c, text_size = size.small, text_halign = text.align_left, text_valign = text.align_top))
+            ln.push(line.new(f.cisT - 5 * 60000, f.cis, f.cisT, f.cis, xloc = xloc.bar_time, color = c, style = line.style_dashed))
+            lb.push(label.new(f.cisT, f.cis, "1m " + dn + " CISD", xloc = xloc.bar_time, style = label.style_none, textcolor = c, size = size.small))
+            for [i, p] in array.from(f.en, f.sl, f.t1, f.t2)
+                if not (i == 2 and f.tp1)
+                    cl = i == 0 ? color.white : i == 1 ? cBear : color.lime
+                    nm = f.name + (i == 0 ? " PO3 Entry" : i == 1 ? " PO3 SL" : i == 2 ? " PO3 TP1" : " PO3 TP2")
+                    ln.push(line.new(f.fT, p, fut, p, xloc = xloc.bar_time, color = cl, width = 2))
+                    lb.push(label.new(fut, p, nm, xloc = xloc.bar_time, style = label.style_label_left, color = color.new(cl, 80), textcolor = cl, size = size.small))
+
+var table tb = table.new(position.top_right, 2, 10, bgcolor = color.new(#11151c, 5), border_width = 1, border_color = #262d3a)
+if showTbl and barstate.islast
+    table.clear(tb, 0, 0, 1, 9)
+    table.cell(tb, 0, 0, "PO3 Watch", text_color = #f5a623, text_size = size.normal, text_halign = text.align_left)
+    live = ""
+    for f in fr
+        if f.st == "LIMIT" or f.st == "IN TRADE"
+            live := live + (live == "" ? "" : " | ") + f.name + (f.dir > 0 ? " LONG " : " SHORT ") + (f.st == "LIMIT" ? "limit " : "in trade ") + str.tostring(f.en, format.mintick) + " SL " + str.tostring(f.sl, format.mintick) + " TP1 " + str.tostring(f.t1, format.mintick) + " TP2 " + str.tostring(f.t2, format.mintick)
+    table.cell(tb, 1, 0, live == "" ? "No PO3 trade takeable right now" : live, text_color = live == "" ? color.gray : color.white, text_size = size.small)
+    for [i, f] in fr
+        table.cell(tb, 0, i + 1, f.name, text_color = color.gray, text_size = size.small, text_halign = text.align_left)
+        table.cell(tb, 1, i + 1, f.st, text_color = f.st == "IN TRADE" ? color.lime : f.st == "LIMIT" ? #f5a623 : color.gray, text_size = size.small, text_halign = text.align_right)
+    n = wins + losses
+    table.cell(tb, 0, 8, "Track record", text_color = color.gray, text_size = size.small, text_halign = text.align_left)
+    table.cell(tb, 1, 8, n > 0 ? str.tostring(wins) + "W – " + str.tostring(losses) + "L (" + str.tostring(math.round(100.0 * wins / n)) + "%)" : "no closed trades on this chart yet", text_color = color.gray, text_size = size.small, text_halign = text.align_right)

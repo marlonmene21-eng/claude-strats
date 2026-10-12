@@ -1,0 +1,192 @@
+//@version=6
+indicator("Scriv Model", overlay = true, max_boxes_count = 200, max_lines_count = 300, max_labels_count = 300)
+
+// Killzones (NY): London 2–5, NY AM 8:30–11, NY PM 13:30–16. A raid of liquidity (Asia/London/NY AM highs-lows,
+// prior day high/low, 15m swings) in the direction against 15m order flow's opposite, then a CISD, then entry in the
+// OTE (62–79%) of the leg — at an FVG edge inside OTE, else 70.5%. Stop 0.03% beyond the raid, targets STDV −1/−2/−2.5
+// of the manipulation leg, stop to breakeven after TP1. Built for a 5m chart (1m also works).
+showTbl = input.bool(true, "Panel")
+stopPct = input.float(0.03, "Stop buffer beyond raid (%)", step = 0.01)
+TZ = "America/New_York"
+cBull = #26a69a
+cBear = #ef5350
+
+// 15m order flow: direction of the last close through a confirmed 2/2 swing; plus last 15m swing high/low
+flow() =>
+    var float hi = na
+    var float lo = na
+    var int d = 0
+    ph = ta.pivothigh(high, 2, 2)
+    pl = ta.pivotlow(low, 2, 2)
+    if not na(ph)
+        hi := ph
+    if not na(pl)
+        lo := pl
+    if not na(hi) and close > hi
+        d := 1, hi := na
+    if not na(lo) and close < lo
+        d := -1, lo := na
+    [d, ta.valuewhen(not na(ph), ph, 0), ta.valuewhen(not na(pl), pl, 0)]
+[of15, sw15H, sw15L] = request.security(syminfo.tickerid, "15", flow(), lookahead = barmerge.lookahead_off)
+[pdH, pdL] = request.security(syminfo.tickerid, "D", [high[1], low[1]], lookahead = barmerge.lookahead_on)
+
+nyH = hour(time, TZ)
+nyM = minute(time, TZ)
+mins = nyH * 60 + nyM
+newDay = nyH == 18 and nyM == 0 and not (hour(time[1], TZ) == 18 and minute(time[1], TZ) == 0)
+var float asiaH = na
+var float asiaL = na
+var float lonH = na
+var float lonL = na
+var float amH = na
+var float amL = na
+if newDay
+    asiaH := na, asiaL := na, lonH := na, lonL := na, amH := na, amL := na
+if nyH >= 20
+    asiaH := na(asiaH) ? high : math.max(asiaH, high), asiaL := na(asiaL) ? low : math.min(asiaL, low)
+if mins >= 120 and mins < 300
+    lonH := na(lonH) ? high : math.max(lonH, high), lonL := na(lonL) ? low : math.min(lonL, low)
+if mins >= 510 and mins < 660
+    amH := na(amH) ? high : math.max(amH, high), amL := na(amL) ? low : math.min(amL, low)
+
+var float dnRun = na
+var float upRun = na
+if close < open and not (close[1] < open[1])
+    dnRun := open
+if close > open and not (close[1] > open[1])
+    upRun := open
+
+// killzone state machine (one at a time)
+var string kzName = ""
+var int    kzEnd = 0
+var int    dir = 0
+var float  ext = na
+var float  L1 = na
+var int    extT = 0
+var bool   raided = false
+var string raidName = ""
+var string st = ""
+var float  legX = na
+var float  en = na
+var float  sl = na
+var float  tp1 = na
+var float  tp2 = na
+var float  tp3 = na
+var int    hit = 0
+var bool   be = false
+var float  oteTop = na
+var float  oteBot = na
+var string entryType = ""
+var int    cisT = 0
+var int    wins = 0
+var int    losses = 0
+
+kzStart = mins == 120 ? "London" : mins == 510 ? "NY AM" : mins == 810 ? "NY PM" : ""
+if kzStart != "" and (timeframe.in_seconds() <= 300)
+    kzName := kzStart, kzEnd := time + (kzStart == "London" ? 180 : kzStart == "NY AM" ? 150 : 150) * 60000
+    dir := 0, raided := false, st := "waiting for raid", ext := na, L1 := na, en := na, hit := 0, be := false
+
+inKz = kzName != "" and time < kzEnd
+if inKz and not raided
+    // raid: price takes a pool that formed before this killzone
+    pools = array.from(asiaH, asiaL, kzName != "London" ? lonH : na, kzName != "London" ? lonL : na, kzName == "NY PM" ? amH : na, kzName == "NY PM" ? amL : na, pdH, pdL, sw15H, sw15L)
+    pn = array.from("Asia High", "Asia Low", "London High", "London Low", "NY AM High", "NY AM Low", "PDH", "PDL", "15m Swing High", "15m Swing Low")
+    for [i, p] in pools
+        if not na(p) and not raided
+            isHigh = i % 2 == 0
+            if isHigh and high > p and of15 != 1
+                raided := true, dir := -1, ext := high, extT := time, L1 := upRun, raidName := pn.get(i), st := "raid – waiting CISD"
+            else if not isHigh and low < p and of15 != -1
+                raided := true, dir := 1, ext := low, extT := time, L1 := dnRun, raidName := pn.get(i), st := "raid – waiting CISD"
+else if inKz and st == "raid – waiting CISD"
+    if dir > 0 and low < ext
+        ext := low, extT := time, L1 := close < open ? dnRun : L1
+    if dir < 0 and high > ext
+        ext := high, extT := time, L1 := close > open ? upRun : L1
+    if not na(L1) and (dir > 0 ? close > L1 : close < L1)
+        st := "LIMIT", cisT := time, legX := dir > 0 ? high : low
+        sl := math.round_to_mintick(ext * (1 - dir * stopPct / 100))
+else if st == "LIMIT"
+    if time >= kzEnd
+        st := "expired"
+    else
+        // OTE of the leg ext → legX; entry at an FVG edge inside OTE, else 70.5%
+        r = math.abs(legX - ext)
+        oteTop := dir > 0 ? legX - 0.62 * r : legX + 0.79 * r
+        oteBot := dir > 0 ? legX - 0.79 * r : legX + 0.62 * r
+        mid = legX - dir * 0.705 * r
+        fvgEdge = dir > 0 and low[1] > high[3] ? low[1] : dir < 0 and high[1] < low[3] ? high[1] : na
+        if not na(fvgEdge) and fvgEdge >= oteBot and fvgEdge <= oteTop
+            en := math.round_to_mintick(fvgEdge), entryType := "FVG"
+        else if na(en) or entryType != "FVG"
+            en := math.round_to_mintick(mid), entryType := "70.5%"
+        if dir > 0 ? low <= sl : high >= sl
+            st := "invalid"
+        else if dir > 0 ? low <= en : high >= en
+            st := "IN TRADE"
+            rm = math.abs(L1 - ext)
+            tp1 := L1 + dir * 1 * rm, tp2 := L1 + dir * 2 * rm, tp3 := L1 + dir * 2.5 * rm
+            R = math.abs(en - sl)
+            if dir * (tp1 - en) <= 0
+                tp1 := en + dir * R
+            if dir * (tp2 - en) <= dir * (tp1 - en)
+                tp2 := en + dir * 2 * R
+            if dir * (tp3 - en) <= dir * (tp2 - en)
+                tp3 := en + dir * 3 * R
+        else
+            legX := dir > 0 ? math.max(legX, high) : math.min(legX, low)
+else if st == "IN TRADE"
+    slv = be ? en : sl
+    if dir > 0 ? low <= slv : high >= slv
+        st := be ? "BE stop" : "stopped"
+        if be
+            wins += 1
+        else
+            losses += 1
+    else
+        if hit == 0 and (dir > 0 ? high >= tp1 : low <= tp1)
+            hit := 1, be := true
+        if hit == 1 and (dir > 0 ? high >= tp2 : low <= tp2)
+            hit := 2
+        if dir > 0 ? high >= tp3 : low <= tp3
+            st := "done", wins += 1
+
+var array<box> bx = array.new<box>()
+var array<line> ln = array.new<line>()
+var array<label> lb = array.new<label>()
+if barstate.islast
+    for b in bx
+        b.delete()
+    for l in ln
+        l.delete()
+    for l in lb
+        l.delete()
+    bx.clear(), ln.clear(), lb.clear()
+    fut = time + 6 * timeframe.in_seconds() * 1000
+    tfl = timeframe.period + "m"
+    if st == "LIMIT" or st == "IN TRADE"
+        c = dir > 0 ? cBull : cBear
+        dn = dir > 0 ? "Bullish" : "Bearish"
+        if st == "LIMIT"
+            bx.push(box.new(cisT, oteTop, fut, oteBot, xloc = xloc.bar_time, border_color = #ab47bc, bgcolor = color.new(#ab47bc, 88), text = tfl + " " + dn + " OTE", text_color = #ab47bc, text_size = size.small, text_halign = text.align_left, text_valign = text.align_top))
+        ln.push(line.new(extT, L1, cisT, L1, xloc = xloc.bar_time, color = c, style = line.style_dashed))
+        lb.push(label.new(cisT, L1, tfl + " " + dn + " CISD", xloc = xloc.bar_time, style = label.style_none, textcolor = c, size = size.small))
+        lv = array.from(en, be ? en : sl, tp1, tp2, tp3)
+        nm = array.from(kzName + " Scriv Entry", be ? kzName + " Scriv SL (BE)" : kzName + " Scriv SL", kzName + " Scriv TP1 (STDV −1)", kzName + " Scriv TP2 (STDV −2)", kzName + " Scriv TP3 (STDV −2.5)")
+        for [i, p] in lv
+            if not na(p) and not (i >= 2 and i - 2 < hit)
+                cl = i == 0 ? color.white : i == 1 ? cBear : color.lime
+                ln.push(line.new(extT, p, fut, p, xloc = xloc.bar_time, color = cl, width = 2))
+                lb.push(label.new(fut, p, nm.get(i), xloc = xloc.bar_time, style = label.style_label_left, color = color.new(cl, 80), textcolor = cl, size = size.small))
+
+var table tb = table.new(position.top_right, 2, 8, bgcolor = color.new(#11151c, 5), border_width = 1, border_color = #262d3a)
+if showTbl and barstate.islast
+    table.clear(tb, 0, 0, 1, 7)
+    table.cell(tb, 0, 0, "Scriv Model", text_color = #ab47bc, text_size = size.normal, text_halign = text.align_left)
+    live = st == "LIMIT" or st == "IN TRADE"
+    table.cell(tb, 1, 0, live ? kzName + (dir > 0 ? " LONG" : " SHORT") + (st == "LIMIT" ? " (waiting for OTE fill)" : " (in trade)") : "No Scriv trade takeable right now", text_color = live ? (dir > 0 ? cBull : cBear) : color.gray, text_size = size.small)
+    rows = array.from("Killzone", "Raided", "15m order flow", "Entry · " + entryType, "Stop" + (be ? " (BE)" : ""), "TP1 / TP2 / TP3", "Track record")
+    vals = array.from(kzName == "" ? "—" : kzName + " · " + st, raidName, of15 > 0 ? "Bullish" : of15 < 0 ? "Bearish" : "Neutral", live ? str.tostring(en, format.mintick) : "—", live ? str.tostring(be ? en : sl, format.mintick) : "—", live ? str.tostring(tp1, format.mintick) + " / " + str.tostring(tp2, format.mintick) + " / " + str.tostring(tp3, format.mintick) : "—", (wins + losses) > 0 ? str.tostring(wins) + "W – " + str.tostring(losses) + "L (" + str.tostring(math.round(100.0 * wins / (wins + losses))) + "% reach TP1)" : "no closed trades on this chart yet")
+    for [i, r] in rows
+        table.cell(tb, 0, i + 1, r, text_color = color.gray, text_size = size.small, text_halign = text.align_left)
+        table.cell(tb, 1, i + 1, vals.get(i), text_color = color.white, text_size = size.small, text_halign = text.align_right)
