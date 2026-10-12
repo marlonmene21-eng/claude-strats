@@ -1,10 +1,12 @@
-// claude_po3w — PO3 Watch (live). Shows only setups takeable right now.
+// claude_po3w — PO3 Watch (live). Runs on every 1H and 4H candle all session plus NY AM; shows only setups takeable right now.
 window.__claudeCore({
   key: 'claude_po3w', title: 'PO3 Watch', color: '#f5a623', pos: { top: 70, right: 330 },
   run: async function (e, H) {
     const { etp, etMs, addDays, hhmm, C } = H;
     const today = H.tday(Date.now());
-    const m1 = await H.bars(e, '1', etMs(addDays(today, -1), 18, 0));
+    // ~2 sessions of 1m (4 after a weekend) so it works right from the 18:00 open
+    let m1 = await H.bars(e, '1', etMs(addDays(today, -2), 18, 0));
+    if (m1.length < 1500) m1 = await H.bars(e, '1', etMs(addDays(today, -4), 18, 0));
     if (m1.length < 30) return { html: 'Not enough 1m data yet.', draws: [] };
     const h1 = await H.bars(e, '60', Date.now() - 6 * 864e5);
     const now = m1.at(-1).t + 60000, day = H.tday(m1.at(-1).t), prev = addDays(day, -1);
@@ -22,8 +24,11 @@ window.__claudeCore({
     for (const s of H.swings(m5, 2)) pools.push({ name: '5m Swing ' + (s.side > 0 ? 'High' : 'Low'), side: s.side, p: s.p, t: s.t });
     const o830 = m1.find(x => x.t >= T(8, 30) && x.t < T(8, 31));
 
-    const frames = [{ name: 'NY AM', short: 'NY AM', tf: 'NY', start: T(9, 30), sweepEnd: T(10, 10), cisdBy: T(10, 30), end: T(12, 0), prevStart: T(8, 30) }];
-    for (let h = 7; h <= 11; h++) frames.push({ name: h + ':00 1H', short: h + ':00', tf: '1H', start: T(h, 0), sweepEnd: T(h, 20), cisdBy: T(h, 30), end: T(h + 1, 0), prevStart: T(h - 1, 0) });
+    // frames: NY AM (9:30), every 1H candle and every 4H candle of the session (18:00 ET → now). Macro hours 7–11 ET are starred.
+    const frames = [{ name: 'NY AM ★', short: 'NY AM', tf: 'NY', start: T(9, 30), sweepEnd: T(10, 10), cisdBy: T(10, 30), end: T(12, 0), prevStart: T(8, 30) }];
+    const s0 = T(18, 0, prev), HR = 3600e3, lab = t => { const p = etp(t); return String(Math.floor(p.mins / 60)).padStart(2, '0') + ':00'; };
+    for (let t = s0 - 8 * HR; t <= now; t += HR) { const h = Math.floor(etp(t).mins / 60), star = h >= 7 && h <= 11 ? ' ★' : ''; frames.push({ name: lab(t) + ' 1H' + star, short: lab(t), tf: '1H', start: t, sweepEnd: t + 20 * 60000, cisdBy: t + 30 * 60000, end: t + HR, prevStart: t - HR }); }
+    for (let t = s0 - 8 * HR; t <= now; t += 4 * HR) frames.push({ name: lab(t) + ' 4H', short: '4H ' + lab(t), tf: '4H', start: t, sweepEnd: t + 80 * 60000, cisdBy: t + 2 * HR, end: t + 4 * HR, prevStart: t - 4 * HR });
 
     function evalFrame(f) {
       if (now <= f.start) return { f, st: 'upcoming' };
@@ -80,13 +85,13 @@ window.__claudeCore({
     const res = frames.map(evalFrame);
     const draws = [], live = res.filter(r => r.st === 'pending' || r.st === 'active');
     for (const r of live) {
-      const d = r.ok.dir, col = d > 0 ? C.bull : C.bear, k = r.f.short;
-      draws.push({ k: k + 'fvg', type: 'box', t1: r.fv.t, t2: now, top: r.fv.top, bot: r.fv.bot, col, ext: true, label: '1m ' + H.dirName(d) + ' FVG' });
-      draws.push({ k: k + 'cisd', type: 'line', t1: r.ok.cs.sT, t2: r.ok.cs.t + 60000, p: r.ok.cs.lvl, col, style: 2, label: '1m ' + H.dirName(d) + ' CISD' });
-      draws.push({ k: k + 'en', type: 'line', t1: r.fv.t, p: r.entry, col: C.entry, w: 2, label: k + ' PO3 Entry' });
-      draws.push({ k: k + 'sl', type: 'line', t1: r.fv.t, p: r.stop, col: C.sl, w: 2, label: k + ' PO3 SL' });
-      draws.push({ k: k + 't1', type: 'line', t1: r.fv.t, p: r.t1.p, col: C.tp, label: k + ' PO3 TP1' });
-      draws.push({ k: k + 't2', type: 'line', t1: r.fv.t, p: r.t2.p, col: C.tp, w: 2, label: k + ' PO3 TP2' });
+      const d = r.ok.dir, col = d > 0 ? C.bull : C.bear, k = r.f.short, id = k + r.f.start;
+      draws.push({ k: id + 'fvg', type: 'box', t1: r.fv.t, t2: now, top: r.fv.top, bot: r.fv.bot, col, ext: true, label: '1m ' + H.dirName(d) + ' FVG' });
+      draws.push({ k: id + 'cisd', type: 'line', t1: r.ok.cs.sT, t2: r.ok.cs.t + 60000, p: r.ok.cs.lvl, col, style: 2, label: '1m ' + H.dirName(d) + ' CISD' });
+      draws.push({ k: id + 'en', type: 'line', t1: r.fv.t, p: r.entry, col: C.entry, w: 2, label: k + ' PO3 Entry' });
+      draws.push({ k: id + 'sl', type: 'line', t1: r.fv.t, p: r.stop, col: C.sl, w: 2, label: k + ' PO3 SL' });
+      draws.push({ k: id + 't1', type: 'line', t1: r.fv.t, p: r.t1.p, col: C.tp, label: k + ' PO3 TP1' });
+      draws.push({ k: id + 't2', type: 'line', t1: r.fv.t, p: r.t2.p, col: C.tp, w: 2, label: k + ' PO3 TP2' });
     }
 
     const stCol = { pending: '#f5a623', active: '#00e676', watching: '#42a5f5', upcoming: '#6b7385' };
@@ -104,8 +109,9 @@ window.__claudeCore({
       html += H.row('TP2 · ' + r.t2.name, H.fmt(e, r.t2.p), C.tp);
       html += H.row('R:R to TP2', (Math.abs(r.t2.p - r.entry) / r.R).toFixed(1) + 'R');
     }
-    html += H.hdr('Frames today (ET)', '#8a93a6');
-    for (const r of res) html += H.row(r.f.name, r.st, stCol[r.st] || '#6b7385');
+    html += H.hdr('Frames — every 1H & 4H candle, all session (ET)', '#8a93a6');
+    // recent frames only (started in the last 4h, plus anything live), newest first
+    for (const r of res.filter(r => r.st === 'pending' || r.st === 'active' || (r.f.start <= now && now - r.f.start < 4 * 3600e3) || r.f.tf === 'NY').sort((a, b) => b.f.start - a.f.start)) html += H.row(r.f.name, r.st, stCol[r.st] || '#6b7385');
     return { html, draws };
   }
 });
