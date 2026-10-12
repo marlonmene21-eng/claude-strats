@@ -210,6 +210,7 @@ window.__claudeCore({
       }
       if (T.st === 'pending' && T.dir !== bias) T.st = 'cancelled (bias flipped)';
     }
+    for (const T of trades) if ((T.st === 'pending' || T.st === 'active') && B1.at(-1).t - T.created > 3600e3) T.st = 'cleared (1h old)';   // wipe trades an hour after they were posted
     for (const T of trades) if (T.st === 'pending' && Math.abs(T.entry - last) > TRN) T.st = 'cancelled (price moved away)';
     // track record: a win = TP1 reached (stop then sits at breakeven), a loss = full stop
     const stats = book[e.sym + '#stats'] || { w: 0, l: 0 };
