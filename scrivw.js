@@ -110,6 +110,9 @@ window.__claudeCore({
 
     const res = kzs.map(evalKz);
     const draws = [], live = res.filter(r => r.st === 'pending' || r.st === 'active');
+    const RR = r => Math.abs(r.tps.at(-1) - r.entry) / Math.abs(r.entry - r.stop);
+    // one trade at a time: keep the most profitable (a trade already filled first, then the highest R:R)
+    if (live.length > 1) { live.sort((a, b) => (b.st === 'active') - (a.st === 'active') || RR(b) - RR(a)); for (const r of live.slice(1)) r.st = 'passed (lower R:R)'; live.length = 1; }
     for (const r of live) {
       const d = r.dir, col = d > 0 ? C.bull : C.bear, k = r.z.name, dn = H.dirName(d), t0 = m5[r.s.k].t;
       draws.push({ k: k + 'ote', type: 'box', t1: r.s.cs.t, t2: now + 30 * 60000, top: Math.max(r.ote.a, r.ote.b), bot: Math.min(r.ote.a, r.ote.b), col: '#ab47bc', a: 0.1, label: '5m ' + dn + ' OTE' });

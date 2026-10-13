@@ -251,7 +251,7 @@ window.__claudeCore({
         cands.push({ dir, entry, stop, R, tp1: H.rt(e, t1.p), tp1n: t1.n, tp2: H.rt(e, t2.p), tp2n: t2.n, conf, score, rr, gexHere, pd, htf, s1: S1.trend === dir });
       }
       cands.sort((a, c) => (c.score - a.score) || (c.rr - a.rr));
-      const best = cands.find(c => c.score >= minScore && c.rr >= 2.5 && c.htf && c.pd && c.s1);
+      const best = cands.filter(c => c.score >= minScore && c.rr >= 2.5 && c.htf && c.pd && c.s1).sort((a, b) => b.rr - a.rr)[0];   // most profitable qualifying setup
       if (best) { trades.push({ ...best, id: Date.now(), created: B1.at(-1).t, last: B1.at(-1).t, st: 'pending' }); live = trades.filter(T => T.st === 'pending' || T.st === 'active'); }
     }
     book[e.sym] = trades.slice(-12); try { localStorage.setItem(TK, JSON.stringify(book)); } catch (x) { }
