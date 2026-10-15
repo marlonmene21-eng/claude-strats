@@ -100,40 +100,55 @@ window.__claudeCore({
       draws.push({ k: id + 't2', type: 'line', t1: r.fv.t, p: r.t2.p, col: C.tp, w: 2, label: k + ' 23 Model TP2' });
     }
 
-    // ---- daily bias (display only — it never changes how 23 Model finds setups)
-    // ICT-style read: 1) yesterday's daily candle vs the day before (close beyond = continuation, sweep + close back inside = reversal),
-    // 2) 4H/1H structure, 3) draw on liquidity (which side of yesterday's range is still untouched), 4) price vs the midnight open
-    const sesOf = t => etMs(addDays(H.tday(t), -1), 18, 0), dayC = [];
-    for (const x of h1) { const k = sesOf(x.t), c = dayC.at(-1); if (!c || c.t !== k) dayC.push({ t: k, o: x.o, h: x.h, l: x.l, c: x.c }); else { c.h = Math.max(c.h, x.h); c.l = Math.min(c.l, x.l); c.c = x.c; } }
-    const curS = sesOf(now - 60000), done = dayC.filter(d => d.t < curS), P1 = done.at(-1), P2 = done.at(-2), last = m1.at(-1).c;
-    const why = []; let sc = 0;
-    if (P1 && P2) {
-      if (P1.c > P2.h) { sc += 2; why.push(['Yesterday closed above the prior day high', 1]); }
-      else if (P1.c < P2.l) { sc -= 2; why.push(['Yesterday closed below the prior day low', -1]); }
-      else if (P1.h > P2.h && P1.c < P2.h) { sc -= 2; why.push(['Yesterday swept the prior high and closed back inside', -1]); }
-      else if (P1.l < P2.l && P1.c > P2.l) { sc += 2; why.push(['Yesterday swept the prior low and closed back inside', 1]); }
-      else why.push(['Inside day yesterday — no daily signal', 0]);
-    }
-    const h4 = []; for (const x of h1) { const s0 = sesOf(x.t), k = s0 + Math.floor((x.t - s0) / 144e5) * 144e5, c = h4.at(-1); if (!c || c.t !== k) h4.push({ t: k, o: x.o, h: x.h, l: x.l, c: x.c }); else { c.h = Math.max(c.h, x.h); c.l = Math.min(c.l, x.l); c.c = x.c; } }
+    // ---- daily + weekly bias (display only — it never changes how 23 Model finds setups)
+    // ICT-style read on each timeframe: 1) last completed candle vs the one before (close beyond = continuation, sweep + close back inside = reversal),
+    // 2) higher-timeframe structure, 3) draw on liquidity (which side of the last range is still untouched), 4) price vs the period's open
+    const HK = 'claude_23_hist|' + e.sym; let hist = window.__23hist;
+    if (!hist || hist.k !== HK || Date.now() - hist.at > 10 * 60000) { hist = window.__23hist = { k: HK, at: Date.now(), b: await H.bars(e, '60', etMs(addDays(today, -70), 18, 0)) }; }
+    const hh = hist.b.filter(x => x.t < h1[0].t).concat(h1), last = m1.at(-1).c;
+    const wdN = d => new Date(d + 'T12:00:00Z').getUTCDay();
+    const sesOf = t => etMs(addDays(H.tday(t), -1), 18, 0), weekOf = t => { const d = H.tday(t); return etMs(addDays(d, -(wdN(d) || 7)), 18, 0); };
+    const build = (B, key) => { const out = []; for (const x of B) { const k = key(x.t), c = out.at(-1); if (!c || c.t !== k) out.push({ t: k, o: x.o, h: x.h, l: x.l, c: x.c }); else { c.h = Math.max(c.h, x.h); c.l = Math.min(c.l, x.l); c.c = x.c; } } return out; };
+    const dayC = build(hh, sesOf), wkC = build(hh, weekOf), h4 = build(hh, t => { const s0 = sesOf(t); return s0 + Math.floor((t - s0) / 144e5) * 144e5; });
     const trend = B => { const sw = H.swings(B, 2); let hi = null, lo = null, tr = 0; for (let i = 0; i < B.length; i++) { for (const q of sw) if (q.i === i - 2) { if (q.side > 0) hi = q; else lo = q; } if (hi && B[i].c > hi.p) { tr = 1; hi = null; } if (lo && B[i].c < lo.p) { tr = -1; lo = null; } } return tr; };
-    const t4 = trend(h4), t1h = trend(h1);
-    if (t4) { sc += t4; why.push(['4H structure ' + (t4 > 0 ? 'bullish' : 'bearish'), t4]); }
-    if (t1h) { sc += t1h * 0.5; why.push(['1H structure ' + (t1h > 0 ? 'bullish' : 'bearish'), t1h]); }
-    let dol = null;
-    if (P1) {
-      const today = m1.filter(x => x.t >= curS), hiT = today.some(x => x.h > P1.h), loT = today.some(x => x.l < P1.l);
-      if (hiT && !loT) dol = { dir: -1, n: 'PDL', p: P1.l }; else if (loT && !hiT) dol = { dir: 1, n: 'PDH', p: P1.h };
-      else if (!hiT && !loT) dol = Math.abs(P1.h - last) <= Math.abs(last - P1.l) ? { dir: 1, n: 'PDH', p: P1.h } : { dir: -1, n: 'PDL', p: P1.l };
-      if (dol) { sc += dol.dir; why.push(['Draw on liquidity: ' + dol.n + ' ' + H.fmt(e, dol.p) + (hiT || loT ? ' (other side already taken)' : ' (closest untaken side)'), dol.dir]); }
-    }
-    const mid = m1.find(x => x.t >= T(0, 0) && x.t < T(0, 1));
-    if (mid) { const d = last > mid.o ? 1 : -1; sc += d * 0.5; why.push([(d > 0 ? 'Above' : 'Below') + ' the midnight open ' + H.fmt(e, mid.o), d]); }
-    const bias = sc >= 1 ? 1 : sc <= -1 ? -1 : 0, conf = Math.min(1, Math.abs(sc) / 4.5), confT = conf >= 0.66 ? 'High' : conf >= 0.33 ? 'Medium' : 'Low';
-    const bCol = bias > 0 ? C.bull : bias < 0 ? C.bear : '#a8a8b0';
-    let html = H.card('Daily Bias', `<div style="display:flex;align-items:baseline;justify-content:space-between;margin:2px 0 4px"><span style="font-size:20px;font-weight:800;letter-spacing:1px;color:${bCol}">${bias > 0 ? 'BULLISH' : bias < 0 ? 'BEARISH' : 'NEUTRAL'}</span><span style="color:#9a9aa4;font-size:11px">${confT} confidence</span></div>`
-      + `<div style="height:4px;border-radius:2px;background:rgba(255,255,255,.08);overflow:hidden;margin-bottom:6px"><div style="height:100%;width:${Math.round(conf * 100)}%;background:${bCol};border-radius:2px"></div></div>`
-      + why.map(([t, d]) => `<div style="display:flex;gap:6px;color:#c9c9d0;font-size:11px;line-height:1.55"><span style="color:${d > 0 ? C.bull : d < 0 ? C.bear : '#77777f'}">${d > 0 ? '▲' : d < 0 ? '▼' : '•'}</span><span>${t}</span></div>`).join('')
-      + `<div style="color:#6e6e77;font-size:10px;margin-top:4px">Info only — doesn't change how 23 Model picks trades.</div>`);
+    const readBias = (C_, curStart, nm, short, trends, openP, openN) => {
+      const done = C_.filter(d => d.t < curStart), P1 = done.at(-1), P2 = done.at(-2), why = []; let sc = 0;
+      if (P1 && P2) {
+        if (P1.c > P2.h) { sc += 2; why.push(['Last ' + nm + ' closed above the prior ' + nm + ' high', 1]); }
+        else if (P1.c < P2.l) { sc -= 2; why.push(['Last ' + nm + ' closed below the prior ' + nm + ' low', -1]); }
+        else if (P1.h > P2.h && P1.c < P2.h) { sc -= 2; why.push(['Last ' + nm + ' swept the prior high and closed back inside', -1]); }
+        else if (P1.l < P2.l && P1.c > P2.l) { sc += 2; why.push(['Last ' + nm + ' swept the prior low and closed back inside', 1]); }
+        else why.push(['Inside ' + nm + ' — no candle signal', 0]);
+      }
+      for (const [lab, tr, w] of trends) if (tr) { sc += tr * w; why.push([lab + ' structure ' + (tr > 0 ? 'bullish' : 'bearish'), tr]); }
+      if (P1) {
+        const cur = hh.filter(x => x.t >= curStart).concat(m1.filter(x => x.t >= curStart && x.t >= h1.at(-1).t)), hiT = cur.some(x => x.h > P1.h), loT = cur.some(x => x.l < P1.l);
+        let dol = null;
+        if (hiT && !loT) dol = { dir: -1, n: short + 'L', p: P1.l }; else if (loT && !hiT) dol = { dir: 1, n: short + 'H', p: P1.h };
+        else if (!hiT && !loT) dol = Math.abs(P1.h - last) <= Math.abs(last - P1.l) ? { dir: 1, n: short + 'H', p: P1.h } : { dir: -1, n: short + 'L', p: P1.l };
+        if (dol) { sc += dol.dir; why.push(['Draw on liquidity: ' + dol.n + ' ' + H.fmt(e, dol.p) + (hiT || loT ? ' (other side already taken)' : ' (closest untaken side)'), dol.dir]); }
+        else why.push(['Both ' + short + 'H and ' + short + 'L already taken', 0]);
+      }
+      if (openP != null) { const d = last > openP ? 1 : -1; sc += d * 0.5; why.push([(d > 0 ? 'Above' : 'Below') + ' the ' + openN + ' ' + H.fmt(e, openP), d]); }
+      const bias = sc >= 1 ? 1 : sc <= -1 ? -1 : 0, conf = Math.min(1, Math.abs(sc) / 4.5);
+      return { bias, conf, why };
+    };
+    const curS = sesOf(now - 60000), curW = weekOf(now - 60000), mid = m1.find(x => x.t >= T(0, 0) && x.t < T(0, 1));
+    const wOpen = (hh.find(x => x.t >= curW) || {}).o;
+    const BD = readBias(dayC, curS, 'day', 'PD', [['4H', trend(h4), 1], ['1H', trend(h1), 0.5]], mid ? mid.o : null, 'midnight open');
+    const BW = readBias(wkC, curW, 'week', 'PW', [['Daily', trend(dayC), 1], ['4H', trend(h4), 0.5]], wOpen, 'weekly open');
+    const bias = BD.bias;   // the trade card compares against the daily bias
+    const biasHtml = B => { const col = B.bias > 0 ? C.bull : B.bias < 0 ? C.bear : '#c8c8d0', ct = B.conf >= 0.66 ? 'High' : B.conf >= 0.33 ? 'Medium' : 'Low';
+      return `<div style="display:flex;align-items:baseline;justify-content:space-between;margin:2px 0 4px"><span style="font-size:20px;font-weight:800;letter-spacing:1px;color:${col}">${B.bias > 0 ? 'BULLISH' : B.bias < 0 ? 'BEARISH' : 'NEUTRAL'}</span><span style="color:#c4c4cc;font-size:11px">${ct} confidence</span></div>`
+        + `<div style="height:4px;border-radius:2px;background:rgba(255,255,255,.12);overflow:hidden;margin-bottom:6px"><div style="height:100%;width:${Math.round(B.conf * 100)}%;background:${col};border-radius:2px"></div></div>`
+        + B.why.map(([t, d]) => `<div style="display:flex;gap:6px;color:#e2e2e8;font-size:11px;line-height:1.55"><span style="color:${d > 0 ? C.bull : d < 0 ? C.bear : '#9a9aa2'}">${d > 0 ? '▲' : d < 0 ? '▼' : '•'}</span><span>${t}</span></div>`).join(''); };
+    // Daily / Weekly switch (remembers your choice)
+    if (!window.__23seg) { window.__23seg = 1; document.addEventListener('click', ev => { const b = ev.target.closest && ev.target.closest('[data-b23]'); if (!b) return; const v = b.dataset.b23; try { localStorage.setItem('claude_23_bias', v); } catch (x) { } const root = b.closest('.g23'); root.querySelectorAll('[data-b23]').forEach(x => { const on = x.dataset.b23 === v; x.style.background = on ? 'rgba(255,255,255,.22)' : 'transparent'; x.style.color = on ? '#fff' : '#b8b8c0'; }); root.querySelectorAll('[data-b23p]').forEach(x => x.style.display = x.dataset.b23p === v ? '' : 'none'); }, true); }
+    let sel = 'D'; try { sel = localStorage.getItem('claude_23_bias') || 'D'; } catch (x) { }
+    const segB = (v, t) => `<span data-b23="${v}" style="cursor:pointer;padding:3px 12px;border-radius:10px;font-size:10.5px;font-weight:700;letter-spacing:.6px;${sel === v ? 'background:rgba(255,255,255,.22);color:#fff' : 'background:transparent;color:#b8b8c0'}">${t}</span>`;
+    let html = H.card('', `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px"><span style="font-weight:700;font-size:10.5px;letter-spacing:1.4px;text-transform:uppercase;color:#d2d2d8">Bias</span><span style="display:inline-flex;padding:2px;border-radius:12px;background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.14)">${segB('D', 'DAILY')}${segB('W', 'WEEKLY')}</span></div>`
+      + `<div data-b23p="D" style="display:${sel === 'D' ? '' : 'none'}">${biasHtml(BD)}</div><div data-b23p="W" style="display:${sel === 'W' ? '' : 'none'}">${biasHtml(BW)}</div>`
+      + `<div style="color:#9a9aa2;font-size:10px;margin-top:4px">Info only — doesn't change how 23 Model picks trades.</div>`);
 
     const stCol = { pending: '#e8c46a', active: '#5fe0a1', watching: '#8fb4ff', upcoming: '#6e6e77' };
     if (!live.length) html += H.card('', `<div style="color:#9a9aa4;text-align:center;padding:4px 0">No 23 Model trade takeable right now.</div>`);
@@ -145,7 +160,7 @@ window.__claudeCore({
       t += H.row('R:R to TP2', (Math.abs(r.t2.p - r.entry) / r.R).toFixed(1) + 'R');
       html += H.card(r.f.name, t);
       // the real confluences this trade was built from
-      const pt = (dot, txt, sub) => `<div style="display:flex;gap:7px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.05)"><span style="color:${dot}">◆</span><div><div style="color:#e6e6ea">${txt}</div>${sub ? `<div style="color:#7e7e88;font-size:10.5px">${sub}</div>` : ''}</div></div>`;
+      const pt = (dot, txt, sub) => `<div style="display:flex;gap:7px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.05)"><span style="color:${dot}">◆</span><div><div style="color:#f2f2f5">${txt}</div>${sub ? `<div style="color:#b4b4bc;font-size:10.5px">${sub}</div>` : ''}</div></div>`;
       let cf = pt('#b9b9c2', r.f.name + ' candle open', 'Range open ' + H.fmt(e, r.O) + (r.f.tf === 'NY' ? ' (9:30)' : ''));
       cf += pt(col, 'Manipulation ' + (d > 0 ? 'below' : 'above') + ' the open', (d > 0 ? 'Low ' : 'High ') + H.fmt(e, r.ok.ext) + ' @ ' + hhmm(m1[r.ok.k].t));
       if (r.ok.swept.length) cf += pt(col, 'Liquidity swept', r.ok.swept.join(' · '));
