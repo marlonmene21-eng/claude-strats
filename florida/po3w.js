@@ -100,24 +100,63 @@ window.__claudeCore({
       draws.push({ k: id + 't2', type: 'line', t1: r.fv.t, p: r.t2.p, col: C.tp, w: 2, label: k + ' 23 Model TP2' });
     }
 
-    const stCol = { pending: '#f5a623', active: '#00e676', watching: '#42a5f5', upcoming: '#6b7385' };
-    let html = '';
-    if (!live.length) html += `<div style="color:#8c8c94;margin:2px 0 4px;text-align:center">No 23 Model trade takeable right now.</div>`;
-    for (const r of live) {
-      const d = r.ok.dir;
-      html += H.hdr(`${r.f.name} — ${d > 0 ? 'LONG' : 'SHORT'} ${r.st === 'active' ? '(in trade)' : '(waiting for fill)'}`, d > 0 ? C.bull : C.bear);
-      if (r.ok.swept.length) html += H.row('Swept', r.ok.swept.join(', '));
-      html += H.row('Manipulation', H.fmt(e, r.ok.ext) + ' @ ' + hhmm(m1[r.ok.k].t));
-      html += H.row('CISD', H.fmt(e, r.ok.cs.lvl) + ' @ ' + hhmm(r.ok.cs.t));
-      html += H.row('Entry (FVG edge)', H.fmt(e, r.entry), C.entry);
-      html += H.row('Stop', H.fmt(e, r.stop), C.sl);
-      html += H.row('TP1 · ' + r.t1.name, H.fmt(e, r.t1.p) + (r.tp1 ? ' ✓' : ''), C.tp);
-      html += H.row('TP2 · ' + r.t2.name, H.fmt(e, r.t2.p), C.tp);
-      html += H.row('R:R to TP2', (Math.abs(r.t2.p - r.entry) / r.R).toFixed(1) + 'R');
+    // ---- daily bias (display only — it never changes how 23 Model finds setups)
+    // ICT-style read: 1) yesterday's daily candle vs the day before (close beyond = continuation, sweep + close back inside = reversal),
+    // 2) 4H/1H structure, 3) draw on liquidity (which side of yesterday's range is still untouched), 4) price vs the midnight open
+    const sesOf = t => etMs(addDays(H.tday(t), -1), 18, 0), dayC = [];
+    for (const x of h1) { const k = sesOf(x.t), c = dayC.at(-1); if (!c || c.t !== k) dayC.push({ t: k, o: x.o, h: x.h, l: x.l, c: x.c }); else { c.h = Math.max(c.h, x.h); c.l = Math.min(c.l, x.l); c.c = x.c; } }
+    const curS = sesOf(now - 60000), done = dayC.filter(d => d.t < curS), P1 = done.at(-1), P2 = done.at(-2), last = m1.at(-1).c;
+    const why = []; let sc = 0;
+    if (P1 && P2) {
+      if (P1.c > P2.h) { sc += 2; why.push(['Yesterday closed above the prior day high', 1]); }
+      else if (P1.c < P2.l) { sc -= 2; why.push(['Yesterday closed below the prior day low', -1]); }
+      else if (P1.h > P2.h && P1.c < P2.h) { sc -= 2; why.push(['Yesterday swept the prior high and closed back inside', -1]); }
+      else if (P1.l < P2.l && P1.c > P2.l) { sc += 2; why.push(['Yesterday swept the prior low and closed back inside', 1]); }
+      else why.push(['Inside day yesterday — no daily signal', 0]);
     }
-    html += H.hdr('Frames — every 1H & 4H candle, all session (ET)', '#8a93a6');
+    const h4 = []; for (const x of h1) { const s0 = sesOf(x.t), k = s0 + Math.floor((x.t - s0) / 144e5) * 144e5, c = h4.at(-1); if (!c || c.t !== k) h4.push({ t: k, o: x.o, h: x.h, l: x.l, c: x.c }); else { c.h = Math.max(c.h, x.h); c.l = Math.min(c.l, x.l); c.c = x.c; } }
+    const trend = B => { const sw = H.swings(B, 2); let hi = null, lo = null, tr = 0; for (let i = 0; i < B.length; i++) { for (const q of sw) if (q.i === i - 2) { if (q.side > 0) hi = q; else lo = q; } if (hi && B[i].c > hi.p) { tr = 1; hi = null; } if (lo && B[i].c < lo.p) { tr = -1; lo = null; } } return tr; };
+    const t4 = trend(h4), t1h = trend(h1);
+    if (t4) { sc += t4; why.push(['4H structure ' + (t4 > 0 ? 'bullish' : 'bearish'), t4]); }
+    if (t1h) { sc += t1h * 0.5; why.push(['1H structure ' + (t1h > 0 ? 'bullish' : 'bearish'), t1h]); }
+    let dol = null;
+    if (P1) {
+      const today = m1.filter(x => x.t >= curS), hiT = today.some(x => x.h > P1.h), loT = today.some(x => x.l < P1.l);
+      if (hiT && !loT) dol = { dir: -1, n: 'PDL', p: P1.l }; else if (loT && !hiT) dol = { dir: 1, n: 'PDH', p: P1.h };
+      else if (!hiT && !loT) dol = Math.abs(P1.h - last) <= Math.abs(last - P1.l) ? { dir: 1, n: 'PDH', p: P1.h } : { dir: -1, n: 'PDL', p: P1.l };
+      if (dol) { sc += dol.dir; why.push(['Draw on liquidity: ' + dol.n + ' ' + H.fmt(e, dol.p) + (hiT || loT ? ' (other side already taken)' : ' (closest untaken side)'), dol.dir]); }
+    }
+    const mid = m1.find(x => x.t >= T(0, 0) && x.t < T(0, 1));
+    if (mid) { const d = last > mid.o ? 1 : -1; sc += d * 0.5; why.push([(d > 0 ? 'Above' : 'Below') + ' the midnight open ' + H.fmt(e, mid.o), d]); }
+    const bias = sc >= 1 ? 1 : sc <= -1 ? -1 : 0, conf = Math.min(1, Math.abs(sc) / 4.5), confT = conf >= 0.66 ? 'High' : conf >= 0.33 ? 'Medium' : 'Low';
+    const bCol = bias > 0 ? C.bull : bias < 0 ? C.bear : '#a8a8b0';
+    let html = H.card('Daily Bias', `<div style="display:flex;align-items:baseline;justify-content:space-between;margin:2px 0 4px"><span style="font-size:20px;font-weight:800;letter-spacing:1px;color:${bCol}">${bias > 0 ? 'BULLISH' : bias < 0 ? 'BEARISH' : 'NEUTRAL'}</span><span style="color:#9a9aa4;font-size:11px">${confT} confidence</span></div>`
+      + `<div style="height:4px;border-radius:2px;background:rgba(255,255,255,.08);overflow:hidden;margin-bottom:6px"><div style="height:100%;width:${Math.round(conf * 100)}%;background:${bCol};border-radius:2px"></div></div>`
+      + why.map(([t, d]) => `<div style="display:flex;gap:6px;color:#c9c9d0;font-size:11px;line-height:1.55"><span style="color:${d > 0 ? C.bull : d < 0 ? C.bear : '#77777f'}">${d > 0 ? '▲' : d < 0 ? '▼' : '•'}</span><span>${t}</span></div>`).join('')
+      + `<div style="color:#6e6e77;font-size:10px;margin-top:4px">Info only — doesn't change how 23 Model picks trades.</div>`);
+
+    const stCol = { pending: '#e8c46a', active: '#5fe0a1', watching: '#8fb4ff', upcoming: '#6e6e77' };
+    if (!live.length) html += H.card('', `<div style="color:#9a9aa4;text-align:center;padding:4px 0">No 23 Model trade takeable right now.</div>`);
+    for (const r of live) {
+      const d = r.ok.dir, col = d > 0 ? C.bull : C.bear;
+      let t = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><span style="font-size:15px;font-weight:800;color:${col}">${d > 0 ? 'LONG' : 'SHORT'}</span><span style="font-size:10px;padding:2px 8px;border-radius:10px;background:${r.st === 'active' ? 'rgba(95,224,161,.15)' : 'rgba(232,196,106,.14)'};color:${r.st === 'active' ? '#5fe0a1' : '#e8c46a'}">${r.st === 'active' ? 'IN TRADE' : 'WAITING FOR FILL'}</span></div>`;
+      t += H.row('Entry', H.fmt(e, r.entry), C.entry) + H.row('Stop', H.fmt(e, r.stop), C.sl);
+      t += H.row('TP1 · ' + r.t1.name, H.fmt(e, r.t1.p) + (r.tp1 ? ' ✓' : ''), C.tp) + H.row('TP2 · ' + r.t2.name, H.fmt(e, r.t2.p), C.tp);
+      t += H.row('R:R to TP2', (Math.abs(r.t2.p - r.entry) / r.R).toFixed(1) + 'R');
+      html += H.card(r.f.name, t);
+      // the real confluences this trade was built from
+      const pt = (dot, txt, sub) => `<div style="display:flex;gap:7px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.05)"><span style="color:${dot}">◆</span><div><div style="color:#e6e6ea">${txt}</div>${sub ? `<div style="color:#7e7e88;font-size:10.5px">${sub}</div>` : ''}</div></div>`;
+      let cf = pt('#b9b9c2', r.f.name + ' candle open', 'Range open ' + H.fmt(e, r.O) + (r.f.tf === 'NY' ? ' (9:30)' : ''));
+      cf += pt(col, 'Manipulation ' + (d > 0 ? 'below' : 'above') + ' the open', (d > 0 ? 'Low ' : 'High ') + H.fmt(e, r.ok.ext) + ' @ ' + hhmm(m1[r.ok.k].t));
+      if (r.ok.swept.length) cf += pt(col, 'Liquidity swept', r.ok.swept.join(' · '));
+      cf += pt(col, '1m ' + H.dirName(d) + ' CISD', H.fmt(e, r.ok.cs.lvl) + ' @ ' + hhmm(r.ok.cs.t));
+      cf += pt(col, '1m ' + H.dirName(d) + ' FVG (entry)', H.fmt(e, r.fv.bot) + ' – ' + H.fmt(e, r.fv.top));
+      cf += pt(C.tp, 'Targets', 'TP1 ' + r.t1.name + ' · TP2 ' + r.t2.name);
+      cf += pt(bias === d ? C.bull : bias ? C.bear : '#77777f', bias === d ? 'With the daily bias' : bias ? 'Against the daily bias' : 'Daily bias neutral', '');
+      html += H.card('Confluences used', cf);
+    }
     // recent frames only (started in the last 4h, plus anything live), newest first
-    for (const r of res.filter(r => r.st === 'pending' || r.st === 'active' || (r.f.start <= now && now - r.f.start < 4 * 3600e3) || r.f.tf === 'NY').sort((a, b) => b.f.start - a.f.start)) html += H.row(r.f.name, r.st, stCol[r.st] || '#6b7385');
+    html += H.card('Frames · every 1H & 4H candle (ET)', res.filter(r => r.st === 'pending' || r.st === 'active' || (r.f.start <= now && now - r.f.start < 4 * 3600e3) || r.f.tf === 'NY').sort((a, b) => b.f.start - a.f.start).map(r => H.row(r.f.name, r.st, stCol[r.st] || '#6e6e77')).join(''));
     return { html, draws };
   }
 });
