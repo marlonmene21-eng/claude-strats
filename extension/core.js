@@ -17,25 +17,51 @@ window.__claudeCore = function (TOOL) {
     return names.reduce((p, n) => p.then(r => r || new Promise(ok => { const tm = setTimeout(() => ok(null), 5000); try { df.resolveSymbol(n, si => { clearTimeout(tm); ok(si); }, () => { clearTimeout(tm); ok(null); }); } catch (x) { ok(null); } })), Promise.resolve(null)).then(r => (r && (rcache[key] = r), r));
   }
   const resMin = r => { r = String(r); if (/S$/.test(r)) return (parseInt(r) || 1) / 60; if (/D$/.test(r)) return 1440 * (parseInt(r) || 1); if (/W$/.test(r)) return 10080 * (parseInt(r) || 1); if (/M$/.test(r)) return 43200 * (parseInt(r) || 1); return parseInt(r) || 1; };
+  // TradingView data client: one websocket, one chart session per symbol+timeframe, kept live by TradingView's updates
+  function tvData(sym, res, n) {
+    const D = window.__claudeTVD || (window.__claudeTVD = { ws: null, ready: null, ser: {}, byCs: {} });
+    const send = (m, p) => { const t = JSON.stringify({ m, p }); D.ws.send('~m~' + t.length + '~m~' + t); };
+    if (!D.ws || D.ws.readyState > 1) {
+      D.ser = {}; D.byCs = {};
+      D.ws = new WebSocket('wss://data.tradingview.com/socket.io/websocket?from=chart%2F&type=chart');
+      D.ready = new Promise((ok, no) => { D.ws.onopen = () => { send('set_auth_token', [(window.user && window.user.auth_token) || 'unauthorized_user_token']); ok(); }; D.ws.onerror = () => no(Error('TradingView data connection failed')); });
+      D.ws.onclose = () => { D.ser = {}; D.byCs = {}; };
+      D.ws.onmessage = ev => {
+        for (const part of String(ev.data).split(/~m~\d+~m~/)) {
+          if (!part) continue;
+          if (part.startsWith('~h~')) { D.ws.send('~m~' + part.length + '~m~' + part); continue; }
+          let j; try { j = JSON.parse(part); } catch (x) { continue; }
+          const S = j.p && D.byCs[j.p[0]]; if (!S) continue;
+          if (j.m === 'timescale_update' || j.m === 'du') { const d = j.p[1] && j.p[1].s1; if (d && d.s) for (const b of d.s) { const v = b.v; S.map.set(v[0] * 1000, { time: v[0] * 1000, open: v[1], high: v[2], low: v[3], close: v[4], volume: v[5] || 0 }); } S.sorted = null; }
+          if (j.m === 'series_completed' || j.m === 'symbol_error' || j.m === 'series_error') S.ok();
+        }
+      };
+    }
+    return D.ready.then(() => {
+      const key = sym + '|' + res; let S = D.ser[key];
+      if (!S || S.n < n) {
+        if (S) { send('chart_delete_session', [S.cs]); delete D.byCs[S.cs]; }
+        const cs = 'cs_' + Math.random().toString(36).slice(2, 14); S = D.ser[key] = { cs, n, map: new Map(), sorted: null }; D.byCs[cs] = S;
+        S.done = new Promise(r => { S.ok = r; setTimeout(r, 10000); });
+        send('chart_create_session', [cs, '']);
+        send('resolve_symbol', [cs, 'sym', '=' + JSON.stringify({ symbol: sym, adjustment: 'splits', session: 'extended' })]);
+        send('create_series', [cs, 's1', 's1', 'sym', res, n, '']);
+      }
+      return S.done.then(() => S.sorted || (S.sorted = [...S.map.values()].sort((a, b) => a.time - b.time)));
+    });
+  }
   function tvEnv() {
     const c = window.TradingViewApi.activeChart();
-    const sx = c.symbolExt() || {};
+    let ms0 = {}; try { ms0 = window._exposed_chartWidgetCollection.activeChartWidget.value().model().mainSeries().symbolInfo() || {}; } catch (x) { }
+    const sx = { ...ms0, ...Object.fromEntries(Object.entries(c.symbolExt() || {}).filter(([, v]) => v != null)) };   // tick size comes from the series' symbol info
+    // continuous symbols (MNQ1!) → the real front contract (MNQZ2026), the same contract TopstepX charts — no back-adjustment
+    const dsym = sx.front_contract ? c.symbol().split(':')[0] + ':' + sx.front_contract : c.symbol();
     const df = {
       resolveSymbol: (n, ok) => ok(sx),
+      // Live bars for any timeframe straight from TradingView's own data feed (same real-time data as your chart)
       getBars: (si, res, p, ok) => {
-        try {
-          const cr = resMin(c.resolution()), want = resMin(res);
-          if (want < cr || Math.round(want / cr) * cr !== want) return ok([]);
-          const pl = window._exposed_chartWidgetCollection.activeChartWidget.value().model().mainSeries().bars();
-          const raw = []; for (let i = pl.firstIndex(); i <= pl.lastIndex(); i++) { const v = pl.valueAt(i); if (v) raw.push(v); }
-          const out = []; let cur = null; const ms = want * 60000;
-          for (const v of raw) {
-            const t = v[0] * 1000, k = want >= 1440 ? Math.floor((t + 2 * 3600e3) / 864e5) * 864e5 - 2 * 3600e3 : Math.floor(t / ms) * ms;
-            if (!cur || cur.time !== k) { cur = { time: k, open: v[1], high: v[2], low: v[3], close: v[4], volume: v[5] || 0 }; out.push(cur); }
-            else { cur.high = Math.max(cur.high, v[2]); cur.low = Math.min(cur.low, v[3]); cur.close = v[4]; cur.volume += v[5] || 0; }
-          }
-          ok(out.filter(x => x.time >= p.from * 1000 && x.time <= p.to * 1000 + ms));
-        } catch (x) { ok([]); }
+        const want = resMin(res), n = Math.min(5000, Math.max(300, Math.ceil((p.to - p.from) / 60 / want) + 50));
+        tvData(dsym, String(res), n).then(b => ok(b.filter(x => x.time >= p.from * 1000 && x.time <= p.to * 1000 + want * 60000)), () => ok([]));
       }
     };
     const tick = (sx.minmov || 1) / (sx.pricescale || 100), dec = Math.max(0, Math.round(Math.log10(sx.pricescale || 100)));
@@ -49,7 +75,8 @@ window.__claudeCore = function (TOOL) {
     if (!api || !api._chartApiInstance) throw new Error('Chart still loading…');
     const c = api.activeChart();
     const df = api._chartApiInstance._studyEngine._externalDatafeed;
-    const sx = c.symbolExt() || {};
+    let ms0 = {}; try { ms0 = window._exposed_chartWidgetCollection.activeChartWidget.value().model().mainSeries().symbolInfo() || {}; } catch (x) { }
+    const sx = { ...ms0, ...Object.fromEntries(Object.entries(c.symbolExt() || {}).filter(([, v]) => v != null)) };   // tick size comes from the series' symbol info
     const si = await resolve(df, [c.symbol(), sx.name, sx.full_name, sx.ticker].filter(Boolean)) || sx;
     const tick = (si.minmov || 1) / (si.pricescale || 100);
     const dec = Math.max(0, Math.round(Math.log10(si.pricescale || 100)));
@@ -185,7 +212,21 @@ window.__claudeCore = function (TOOL) {
   // helpers exposed to tools
   const C = { bull: '#26a69a', bear: '#ef5350', dim: '#787b86', bsl: '#f5a623', ssl: '#42a5f5', entry: '#e0e0e0', sl: '#ef5350', tp: '#00e676' };
   const tday = ms => { const p = etp(ms); return p.h >= 18 ? addDays(p.day, 1) : p.day; };
-  const H = { tday, etp, etMs, addDays, hhmm, bars, agg, range, takenAt, fvgs, swings, rbs, tapAt, cisdAt, C, rgba,
+  function gexLevels(o, SN, R, hasQ, useGm) {
+    const bs = (s, q) => { if (!q.iv) return 0; const v = q.iv * Math.sqrt(q.T), d1 = (Math.log(s / q.K) + q.iv * q.iv * q.T / 2) / v; return Math.exp(-d1 * d1 / 2) / 2.5066 / (s * v); };
+    const dg = (q, x) => { const s = x / q.sc; return (useGm && x === SN && q.gm > 0 ? q.gm : bs(s, q)) * q.oi * s * s; };
+    const st = hasQ ? R : 25, B = new Map;
+    for (const q of o) { const v = dg(q, SN), Kn = q.K * q.sc, i = Math.round(Kn / st), r = B.get(i) || { w: 0, kw: 0, c: 0, p: 0 }; q.c ? r.c += v : r.p += v; r.w += v; r.kw += v * Kn; B.set(i, r); }
+    const k = [...B.values()].filter(r => r.w > 0).map(r => ({ K: Math.round(r.kw / r.w / 5) * 5, c: r.c, p: r.p })).filter(r => r.K > SN * .9 && r.K < SN * 1.1);
+    if (!k.length) return { cw: null, pw: null, flip: null, piv: [], regime: '—' };
+    const cw = k.reduce((a, r) => r.c > a.c ? r : a).K, pw = k.reduce((a, r) => r.p > a.p ? r : a).K, n = x => o.reduce((a, q) => a + (q.c ? 1 : -1) * dg(q, x), 0);
+    let f = null, P = null;
+    for (let x = SN * .94; x <= SN * 1.06; x += SN * .001) { const v = n(x); if (P && Math.sign(v) != Math.sign(P.v)) { const z = P.x + (x - P.x) * Math.abs(P.v) / (Math.abs(P.v) + Math.abs(v)); if (f == null || Math.abs(z - SN) < Math.abs(f - SN)) f = z; } P = { x, v }; }
+    const pv = [];
+    for (const r of k.map(r => ({ K: r.K, n: r.c - r.p })).sort((a, b) => Math.abs(b.n) - Math.abs(a.n))) if (pv.length < 2 && Math.abs(r.K - cw) > SN * .002 && Math.abs(r.K - pw) > SN * .002 && Math.abs(r.K - SN) < SN * .03 && !pv.some(q => Math.abs(q - r.K) < SN * .002)) pv.push(r.K);
+    return { cw, pw, flip: f == null ? null : Math.round(f), piv: pv, regime: n(SN) >= 0 ? 'Positive' : 'Negative' };
+  }
+  const H = { tday, etp, etMs, addDays, hhmm, bars, agg, range, takenAt, fvgs, swings, rbs, tapAt, cisdAt, C, rgba, gexLevels,
     fmt: (e, p) => p == null ? '–' : p.toLocaleString('en-US', { minimumFractionDigits: e.dec, maximumFractionDigits: e.dec }),
     rt: (e, p) => Math.round(p / e.tick) * e.tick,
     dirName: d => d > 0 ? 'Bullish' : 'Bearish',
