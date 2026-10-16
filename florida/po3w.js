@@ -14,15 +14,30 @@ window.__claudeCore({
 .c23 .ov23{position:absolute;inset:0;z-index:60;border-radius:22px;background:rgba(6,6,8,.94);display:flex;align-items:center;justify-content:center;overflow:hidden;transition:opacity .45s ease}
 .c23 .em23{font-size:40px;line-height:1;transform:scale(.12);animation:grow23 1.5s cubic-bezier(.2,.75,.2,1) forwards}
 @keyframes grow23{to{transform:scale(var(--s23,6))}}
-.c23.asia23{border-color:rgba(255,198,92,.6)!important;background:linear-gradient(160deg,rgba(214,32,48,.22) 0%,rgba(130,10,24,.12) 45%,rgba(0,0,0,.14) 100%)!important;box-shadow:0 18px 50px rgba(140,0,10,.35),inset 0 1px 0 rgba(255,214,130,.5),inset 0 0 0 1px rgba(255,198,92,.08)!important}
-.c23.asia23 .g23{border-color:rgba(255,198,92,.32);background:linear-gradient(180deg,rgba(255,90,90,.10),rgba(255,198,92,.04))}
-.c23.asia23 [data-h] img + div{background:linear-gradient(180deg,#fff6d6 0%,#ffd76e 42%,#b8860b 54%,#ffe3a0 74%,#fff3c8 100%)!important;-webkit-background-clip:text!important;background-clip:text!important}
+.c23.asia23{border:none!important;border-radius:8px!important;color:#2a1a0c!important;text-shadow:none!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;
+background:radial-gradient(ellipse at 50% 50%,rgba(255,250,235,.0) 55%,rgba(120,80,30,.28) 100%),repeating-linear-gradient(0deg,rgba(120,80,30,.035) 0 2px,rgba(255,255,255,0) 2px 5px),linear-gradient(180deg,#f2e2bb 0%,#ead7a6 50%,#e3cb93 100%)!important;
+box-shadow:0 22px 50px rgba(0,0,0,.55),inset 0 0 40px rgba(110,70,20,.35)!important;padding:14px 0!important}
+.c23.asia23::before,.c23.asia23::after{content:'';position:absolute;left:-2px;right:-2px;height:14px;z-index:5;border-radius:7px;pointer-events:none;background:linear-gradient(180deg,#2e1a09,#8a5a24 30%,#e0b467 50%,#8a5a24 70%,#2e1a09);box-shadow:0 3px 6px rgba(0,0,0,.55)}
+.c23.asia23::before{top:0}.c23.asia23::after{bottom:0}
+.c23.asia23 [data-h]{background:none!important}
+.c23.asia23 > div:nth-of-type(1){display:none}
+.c23.asia23 [data-h] img + div{background:none!important;-webkit-text-fill-color:#7a1010!important;color:#7a1010!important;filter:none!important;letter-spacing:6px!important}
+.c23.asia23 [data-h] img + div + div{background:linear-gradient(90deg,transparent,rgba(122,16,16,.55),transparent)!important}
+.c23.asia23 .g23{background:rgba(255,248,230,.25)!important;border:1px solid rgba(90,55,20,.35)!important;box-shadow:none!important}
+.c23.asia23 [data-b],.c23.asia23 [data-b] *{color:#2a1a0c!important;text-shadow:none!important;border-color:rgba(90,55,20,.18)!important}
+.c23.asia23 [data-b] [style*="#26a69a"],.c23.asia23 [data-b] [style*="#00e676"],.c23.asia23 [data-b] [style*="#5fe0a1"]{color:#1d6b3a!important}
+.c23.asia23 [data-b] [style*="#ef5350"]{color:#8b1515!important}
+.c23.asia23 [data-b] [style*="#e8c46a"]{color:#8a5a00!important}
+.c23.asia23 [data-b] [style*="background:#26a69a"],.c23.asia23 [data-b] [style*="height:100%;width"]{background:#7a1010!important}
+.c23.asia23 [data-b23].on,.c23.asia23 [data-b23][style*="rgba(255,255,255,.22)"],.c23.asia23 [data-b23][style*="0.22"]{background:rgba(122,16,16,.85)!important;color:#fff3d6!important}
+.c23.asia23 ::-webkit-scrollbar-thumb{background:rgba(110,70,25,.45)}
+.c23.asia23 [data-a]{background:rgba(60,35,12,.12)!important;color:#3a2410!important;border-color:rgba(60,35,12,.35)!important}
+.c23.asia23 .cd23{color:#5a3a18!important}
 .c23.asia23 [data-b],.c23.asia23 [data-b] *,.c23.asia23 [data-h] img + div{font-family:'Yuji Syuku',serif!important}
-.c23 .unroll23{animation:unroll23 1.4s cubic-bezier(.25,.8,.25,1) both}@keyframes unroll23{from{clip-path:inset(0 0 100% 0)}to{clip-path:inset(0 0 0 0)}}
-.c23 .rod23{position:absolute;left:34px;right:34px;height:9px;border-radius:5px;z-index:3;pointer-events:none;background:linear-gradient(180deg,#3b2410,#c9994a 45%,#f1d38c 55%,#5a3916);box-shadow:0 2px 4px rgba(0,0,0,.6)}
-.c23 .rod23 i{position:absolute;top:-3px;width:10px;height:15px;border-radius:4px;background:linear-gradient(90deg,#2a1608,#b9863a,#2a1608)}
-.c23.asia23 [data-h]{background:radial-gradient(ellipse 70% 80% at 50% 40%,rgba(244,226,180,.16),rgba(244,226,180,0) 70%)}
-.c23.asia23 [data-m].on{background:linear-gradient(180deg,#ffe08a,#d4a12e);color:#3a0006;border-color:#ffd76e}`;
+.c23.asia23 [data-m]{border-color:rgba(60,35,12,.35);background:rgba(60,35,12,.1);color:#3a2410}
+.c23.asia23 [data-m].on{background:linear-gradient(180deg,#9b1c1c,#6e0d0d);color:#fff1d0;border-color:#5a0a0a}
+.c23 .unrollP{animation:unrollP 1.8s cubic-bezier(.3,.75,.25,1) both}@keyframes unrollP{from{clip-path:inset(0 0 100% 0)}to{clip-path:inset(0 0 0 0)}}
+.c23 .rod23{position:absolute;left:-2px;right:-2px;height:14px;border-radius:7px;z-index:70;pointer-events:none;background:linear-gradient(180deg,#2e1a09,#8a5a24 30%,#e0b467 50%,#8a5a24 70%,#2e1a09);box-shadow:0 4px 8px rgba(0,0,0,.6)}`;
       P.appendChild(css);
       if (!document.getElementById('font23')) { const l = document.createElement('link'); l.id = 'font23'; l.rel = 'stylesheet'; l.href = 'https://fonts.googleapis.com/css2?family=Yuji+Syuku&display=swap'; document.head.appendChild(l); }
       const box = document.createElement('div'); box.style.cssText = 'position:absolute;top:10px;left:12px;display:flex;gap:5px;z-index:2';
@@ -46,16 +61,14 @@ window.__claudeCore({
         ov.innerHTML = '<div class="em23">\u{1F977}</div>'; P.appendChild(ov);
         ov.firstChild.style.setProperty('--s23', (Math.max(P.offsetWidth, P.offsetHeight) * 0.85 / 40).toFixed(2));
         setTimeout(() => paint('ASIA'), 1500);            // colour change happens while everything is hidden
-        setTimeout(() => { ov.style.opacity = '0'; }, 1650);
-        // ancient scroll: logo + name unroll from the top under a wooden rod
+        setTimeout(() => { ov.style.transition = 'none'; ov.style.opacity = '0'; }, 1650);
+        // ancient scroll: the whole panel unrolls top → bottom under a wooden rod, everything written on the parchment
         setTimeout(() => {
-          const parts = [hd.querySelector('img'), hd.querySelector('img + div')].filter(Boolean);
-          parts.forEach(el => { el.classList.remove('unroll23'); void el.offsetWidth; el.classList.add('unroll23'); });
-          const top0 = parts[0] ? parts[0].offsetTop - 6 : 8, end = parts.length ? parts.at(-1).offsetTop + parts.at(-1).offsetHeight + 4 : 120;
-          const rod = document.createElement('div'); rod.className = 'rod23'; rod.innerHTML = '<i style="left:-8px"></i><i style="right:-8px"></i>'; rod.style.top = top0 + 'px'; hd.appendChild(rod);
-          rod.animate([{ top: top0 + 'px' }, { top: end + 'px' }], { duration: 1400, easing: 'cubic-bezier(.25,.8,.25,1)', fill: 'forwards' });
-          setTimeout(() => { rod.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 500, fill: 'forwards' }); setTimeout(() => rod.remove(), 520); }, 1700);
-        }, 1700);
+          P.classList.remove('unrollP'); void P.offsetWidth; P.classList.add('unrollP');
+          const H0 = P.offsetHeight, rod = document.createElement('div'); rod.className = 'rod23'; rod.style.top = '0px'; P.appendChild(rod);
+          rod.animate([{ top: '0px' }, { top: (H0 - 14) + 'px' }], { duration: 1800, easing: 'cubic-bezier(.3,.75,.25,1)', fill: 'forwards' });
+          setTimeout(() => { rod.remove(); P.classList.remove('unrollP'); }, 1850);
+        }, 1650);
         setTimeout(() => ov.remove(), 2150);
       }, true);
     })();
