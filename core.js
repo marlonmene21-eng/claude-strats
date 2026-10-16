@@ -197,8 +197,8 @@ window.__claudeCore = function (TOOL) {
   document.body.appendChild(P);
   if (TH) { P.classList.add('c23');
     // remember the size you drag it to
-    try { const z = JSON.parse(localStorage.getItem('claude_size_' + TOOL.key) || 'null'); if (z) { P.style.width = z.w + 'px'; P.style.height = z.h + 'px'; } } catch (x) { }
-    new ResizeObserver(() => { try { if (P.querySelector('[data-b]').style.display === 'none' || P.classList.contains('mini23') || P.dataset.anim) return; localStorage.setItem('claude_size_' + TOOL.key, JSON.stringify({ w: P.offsetWidth, h: P.offsetHeight })); } catch (x) { } }).observe(P);
+    try { const z = JSON.parse(localStorage.getItem('claude_size_' + TOOL.key) || 'null'); if (z && z.w >= 200 && z.h >= 150) { P.style.width = z.w + 'px'; P.style.height = z.h + 'px'; } } catch (x) { }
+    new ResizeObserver(() => { try { if (!P.isConnected || P.offsetWidth < 200 || P.querySelector('[data-b]').style.display === 'none' || P.classList.contains('mini23') || P.dataset.anim) return; localStorage.setItem('claude_size_' + TOOL.key, JSON.stringify({ w: P.offsetWidth, h: P.offsetHeight })); } catch (x) { } }).observe(P);
   }
   const body = P.querySelector('[data-b]');
   (() => { const h = P.querySelector('[data-h]'); let sx, sy, ox, oy, mv = false; h.addEventListener('mousedown', ev => { if (ev.target.tagName === 'BUTTON') return; mv = true; sx = ev.clientX; sy = ev.clientY; const r = P.getBoundingClientRect(); ox = r.left; oy = r.top; ev.preventDefault(); }); window.addEventListener('mousemove', ev => { if (!mv) return; P.style.left = (ox + ev.clientX - sx) + 'px'; P.style.top = (oy + ev.clientY - sy) + 'px'; P.style.right = 'auto'; }); window.addEventListener('mouseup', () => mv = false); })();
