@@ -17,8 +17,10 @@ window.__claudeCore({
 .c23.asia23{border-color:rgba(255,198,92,.6)!important;background:linear-gradient(160deg,rgba(214,32,48,.22) 0%,rgba(130,10,24,.12) 45%,rgba(0,0,0,.14) 100%)!important;box-shadow:0 18px 50px rgba(140,0,10,.35),inset 0 1px 0 rgba(255,214,130,.5),inset 0 0 0 1px rgba(255,198,92,.08)!important}
 .c23.asia23 .g23{border-color:rgba(255,198,92,.32);background:linear-gradient(180deg,rgba(255,90,90,.10),rgba(255,198,92,.04))}
 .c23.asia23 [data-h] img + div{background:linear-gradient(180deg,#fff6d6 0%,#ffd76e 42%,#b8860b 54%,#ffe3a0 74%,#fff3c8 100%)!important;-webkit-background-clip:text!important;background-clip:text!important}
+.c23.asia23 [data-b],.c23.asia23 [data-b] *,.c23.asia23 [data-h] img + div{font-family:'Yuji Syuku',serif!important}
 .c23.asia23 [data-m].on{background:linear-gradient(180deg,#ffe08a,#d4a12e);color:#3a0006;border-color:#ffd76e}`;
       P.appendChild(css);
+      if (!document.getElementById('font23')) { const l = document.createElement('link'); l.id = 'font23'; l.rel = 'stylesheet'; l.href = 'https://fonts.googleapis.com/css2?family=Yuji+Syuku&display=swap'; document.head.appendChild(l); }
       const box = document.createElement('div'); box.style.cssText = 'position:absolute;top:10px;left:12px;display:flex;gap:5px;z-index:2';
       box.innerHTML = '<button data-m="NY">NY</button><button data-m="ASIA">ASIA</button><span class="cd23"></span>';
       hd.appendChild(box);
@@ -37,7 +39,7 @@ window.__claudeCore({
         if (m === 'NY') return paint('NY');
         try { const a = new Audio(SND); a.volume = 1; a.play().catch(() => { }); } catch (x) { }   // plays once
         const ov = document.createElement('div'); ov.className = 'ov23';
-        ov.innerHTML = '<div class="em23">\u{1F44D}</div>'; P.appendChild(ov);
+        ov.innerHTML = '<div class="em23">\u{1F977}</div>'; P.appendChild(ov);
         ov.firstChild.style.setProperty('--s23', (Math.max(P.offsetWidth, P.offsetHeight) * 0.85 / 40).toFixed(2));
         setTimeout(() => paint('ASIA'), 1500);            // colour change happens while everything is hidden
         setTimeout(() => { ov.style.opacity = '0'; }, 1650);
