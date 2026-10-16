@@ -197,7 +197,7 @@ box-shadow:0 22px 50px rgba(0,0,0,.55),inset 0 0 40px rgba(110,70,20,.35)!import
         if (end - st + 1 >= 15) cons = { t1: m1[st].t, t2: m1[end].t + 60000, hi, lo };
       }
       if (cons && Math.max(0, cons.lo - lastP, lastP - cons.hi) <= RNG) {
-        draws.push({ k: 'ctxcons', type: 'line', t1: cons.t1, t2: cons.t2, p: cons.lo, col: '#b9b9c2', style: 0, w: 2, label: 'Consolidation', ha: 'center', va: 'bottom' });
+        draws.push({ k: 'ctxcons', type: 'line', t1: cons.t1, t2: cons.t2, p: H.rt(e, cons.lo - gap * 0.5), col: '#b9b9c2', style: 0, w: 2, label: 'Consolidation', ha: 'center', va: 'bottom' });   // sits just under the range so it never merges with other lines
       }
       // 3) higher-timeframe manipulation candle: the latest 1H (else 4H) candle that swept away from its open
       const manip = res.filter(r => r.f.tf !== 'NY' && r.f.start <= now && r.O != null).sort((a, b) => b.f.start - a.f.start).map(r => {
@@ -205,7 +205,7 @@ box-shadow:0 22px 50px rgba(0,0,0,.55),inset 0 0 40px rgba(110,70,20,.35)!import
         return c ? { r, dir: c.dir, ext: c.ext, t: m1[c.k] ? m1[c.k].t : r.f.start } : null; }).filter(Boolean);
       const mp = manip.find(x => x.r.f.tf === '1H') || manip[0];
       if (mp && free(mp.ext, gap) && Math.abs(mp.ext - lastP) <= RNG) {
-        draws.push({ k: 'ctxman', type: 'line', t1: mp.r.f.start, t2: now, p: mp.ext, col: '#e8c46a', style: 1, w: 1, label: mp.r.f.tf + ' Manipulation ' + (mp.dir > 0 ? 'Low' : 'High'), ha: 'left', va: mp.dir > 0 ? 'bottom' : 'top' });
+        draws.push({ k: 'ctxman', type: 'line', t1: mp.r.f.start, t2: now, p: mp.ext, col: '#e8c46a', style: 1, w: 1, label: mp.r.f.tf + ' Manipulation ' + (mp.dir > 0 ? 'Low' : 'High'), ha: 'right', va: mp.dir > 0 ? 'bottom' : 'top' });
         used.push(mp.ext);
       }
       // 4) unmitigated 15m RBs: box from the candle body to the end of its wick (closed candles, untouched since)
