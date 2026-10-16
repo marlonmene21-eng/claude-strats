@@ -18,6 +18,10 @@ window.__claudeCore({
 .c23.asia23 .g23{border-color:rgba(255,198,92,.32);background:linear-gradient(180deg,rgba(255,90,90,.10),rgba(255,198,92,.04))}
 .c23.asia23 [data-h] img + div{background:linear-gradient(180deg,#fff6d6 0%,#ffd76e 42%,#b8860b 54%,#ffe3a0 74%,#fff3c8 100%)!important;-webkit-background-clip:text!important;background-clip:text!important}
 .c23.asia23 [data-b],.c23.asia23 [data-b] *,.c23.asia23 [data-h] img + div{font-family:'Yuji Syuku',serif!important}
+.c23 .unroll23{animation:unroll23 1.4s cubic-bezier(.25,.8,.25,1) both}@keyframes unroll23{from{clip-path:inset(0 0 100% 0)}to{clip-path:inset(0 0 0 0)}}
+.c23 .rod23{position:absolute;left:34px;right:34px;height:9px;border-radius:5px;z-index:3;pointer-events:none;background:linear-gradient(180deg,#3b2410,#c9994a 45%,#f1d38c 55%,#5a3916);box-shadow:0 2px 4px rgba(0,0,0,.6)}
+.c23 .rod23 i{position:absolute;top:-3px;width:10px;height:15px;border-radius:4px;background:linear-gradient(90deg,#2a1608,#b9863a,#2a1608)}
+.c23.asia23 [data-h]{background:radial-gradient(ellipse 70% 80% at 50% 40%,rgba(244,226,180,.16),rgba(244,226,180,0) 70%)}
 .c23.asia23 [data-m].on{background:linear-gradient(180deg,#ffe08a,#d4a12e);color:#3a0006;border-color:#ffd76e}`;
       P.appendChild(css);
       if (!document.getElementById('font23')) { const l = document.createElement('link'); l.id = 'font23'; l.rel = 'stylesheet'; l.href = 'https://fonts.googleapis.com/css2?family=Yuji+Syuku&display=swap'; document.head.appendChild(l); }
@@ -43,6 +47,15 @@ window.__claudeCore({
         ov.firstChild.style.setProperty('--s23', (Math.max(P.offsetWidth, P.offsetHeight) * 0.85 / 40).toFixed(2));
         setTimeout(() => paint('ASIA'), 1500);            // colour change happens while everything is hidden
         setTimeout(() => { ov.style.opacity = '0'; }, 1650);
+        // ancient scroll: logo + name unroll from the top under a wooden rod
+        setTimeout(() => {
+          const parts = [hd.querySelector('img'), hd.querySelector('img + div')].filter(Boolean);
+          parts.forEach(el => { el.classList.remove('unroll23'); void el.offsetWidth; el.classList.add('unroll23'); });
+          const top0 = parts[0] ? parts[0].offsetTop - 6 : 8, end = parts.length ? parts.at(-1).offsetTop + parts.at(-1).offsetHeight + 4 : 120;
+          const rod = document.createElement('div'); rod.className = 'rod23'; rod.innerHTML = '<i style="left:-8px"></i><i style="right:-8px"></i>'; rod.style.top = top0 + 'px'; hd.appendChild(rod);
+          rod.animate([{ top: top0 + 'px' }, { top: end + 'px' }], { duration: 1400, easing: 'cubic-bezier(.25,.8,.25,1)', fill: 'forwards' });
+          setTimeout(() => { rod.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 500, fill: 'forwards' }); setTimeout(() => rod.remove(), 520); }, 1700);
+        }, 1700);
         setTimeout(() => ov.remove(), 2150);
       }, true);
     })();
