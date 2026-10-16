@@ -35,8 +35,7 @@ box-shadow:0 22px 50px rgba(0,0,0,.55),inset 0 0 40px rgba(110,70,20,.35)!import
 .c23.asia23 [data-b],.c23.asia23 [data-b] *,.c23.asia23 [data-h] img + div{font-family:'Yuji Syuku',serif!important}
 .c23.asia23 [data-m]{border-color:rgba(60,35,12,.35);background:rgba(60,35,12,.1);color:#3a2410}
 .c23.asia23 [data-m].on{background:linear-gradient(180deg,#9b1c1c,#6e0d0d);color:#fff1d0;border-color:#5a0a0a}
-.c23.asia23.mini23{border-radius:50%!important;padding:0!important;box-shadow:0 10px 26px rgba(0,0,0,.55),0 0 0 3px #8a5a24,0 0 0 5px #2e1a09,0 0 0 6px #e0b467,inset 0 0 18px rgba(110,70,20,.45)!important}
-.c23.asia23.mini23:hover{box-shadow:0 12px 30px rgba(0,0,0,.6),0 0 0 3px #a8722e,0 0 0 5px #2e1a09,0 0 0 6px #f1d38c,0 0 22px rgba(224,180,103,.45),inset 0 0 18px rgba(110,70,20,.45)!important}
+.c23.asia23.mini23{border-radius:0!important;padding:0!important;background:transparent!important;box-shadow:none!important}
 .c23 .unrollP{animation:unrollP 1.8s cubic-bezier(.3,.75,.25,1) both}@keyframes unrollP{from{clip-path:inset(0 0 100% 0)}to{clip-path:inset(0 0 0 0)}}
 .c23 .rod23{position:absolute;left:-2px;right:-2px;height:14px;border-radius:7px;z-index:70;pointer-events:none;background:linear-gradient(180deg,#2e1a09,#8a5a24 30%,#e0b467 50%,#8a5a24 70%,#2e1a09);box-shadow:0 4px 8px rgba(0,0,0,.6)}`;
       P.appendChild(css);
