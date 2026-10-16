@@ -223,7 +223,7 @@ window.__claudeCore = function (TOOL) {
   function shrink23() {
     if (P.classList.contains('mini23') || P.dataset.anim) return; P.dataset.anim = '1';
     const r = P.getBoundingClientRect(), img = P.querySelector('[data-h] img'), lr = img ? img.getBoundingClientRect() : r, S = 88;
-    saved23 = { w: r.width, h: r.height, l: r.left, t: r.top };
+    saved23 = { w: Math.max(260, r.width), h: Math.max(220, r.height), l: r.left, t: r.top };
     P.style.left = r.left + 'px'; P.style.top = r.top + 'px'; P.style.right = 'auto';
     P.classList.add('fade23');
     setTimeout(() => {
@@ -240,7 +240,8 @@ window.__claudeCore = function (TOOL) {
     if (!P.classList.contains('mini23') || P.dataset.anim || !saved23) return; P.dataset.anim = '1';
     const r = P.getBoundingClientRect(), z = saved23;
     const W = Math.min(z.w, innerWidth - 8), Hh = Math.min(z.h, innerHeight - 8);
-    const L = Math.min(Math.max(4, r.left + r.width / 2 - W / 2), innerWidth - W - 4), T = Math.min(Math.max(4, r.top), innerHeight - Hh - 4);
+    const cl = (v, a, b) => Math.max(a, Math.min(v, Math.max(a, b)));
+    const L = cl(r.left + r.width / 2 - W / 2, 4, innerWidth - W - 4), T = cl(r.top, 4, innerHeight - Hh - 4);
     P.classList.remove('mini23'); P.classList.add('fade23');
     Object.assign(P.style, { width: W + 'px', height: Hh + 'px', left: L + 'px', top: T + 'px' });
     P.animate([{ width: r.width + 'px', height: r.height + 'px', left: r.left + 'px', top: r.top + 'px', borderRadius: '50%' },
