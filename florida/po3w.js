@@ -174,6 +174,49 @@ box-shadow:0 22px 50px rgba(0,0,0,.55),inset 0 0 40px rgba(110,70,20,.35)!import
       draws.push({ k: id + 't2', type: 'line', t1: r.fv.t, p: r.t2.p, col: C.tp, w: 2, label: k + ' 23 Model TP2' });
     }
 
+    // ---- chart context (display only): latest 1m CISD, the latest consolidation, the higher-timeframe manipulation candle, unmitigated 15m RBs
+    {
+      const lastP = m1.at(-1).c, NQx = /NQ|NDX|NAS/.test((e.sym || '').toUpperCase()), RNG = NQx ? 120 : lastP * 120 / 30000;
+      const used = [];   // price bands already labelled — keeps labels from piling on top of each other
+      const free = (p, gap) => !used.some(q => Math.abs(q - p) < gap); const gap = NQx ? 6 : lastP * 6 / 30000;
+      for (const r of live) used.push(r.entry, r.stop, r.t1.p, r.t2.p, r.ok.cs.lvl);
+      // 1) most recent 1m CISD only (replaced as soon as a newer one forms)
+      const tail = m1.slice(-240); let cz = null;
+      for (const sw of H.swings(tail, 2)) { const c = H.cisdAt(tail, sw.i, -sw.side, Infinity); if (c && (!cz || c.t > cz.c.t)) cz = { dir: -sw.side, c }; }
+      if (cz && !live.some(r => Math.abs(r.ok.cs.lvl - cz.c.lvl) < 1e-9) && Math.abs(cz.c.lvl - lastP) <= RNG) {
+        draws.push({ k: 'ctxcisd', type: 'line', t1: cz.c.sT, t2: now, p: cz.c.lvl, col: cz.dir > 0 ? C.bull : C.bear, style: 2, w: 1, label: '1m ' + H.dirName(cz.dir) + ' CISD', ha: 'right', va: cz.dir > 0 ? 'bottom' : 'top' });
+        used.push(cz.c.lvl);
+      }
+      // 2) latest consolidation: the most recent stretch (15+ 1m bars) that stayed inside a tight range — underlined at its low
+      const tr = []; for (let i = 1; i < m1.length; i++) tr.push(Math.max(m1[i].h - m1[i].l, Math.abs(m1[i].h - m1[i - 1].c), Math.abs(m1[i].l - m1[i - 1].c)));
+      const avgTR = tr.slice(-120).reduce((a, b) => a + b, 0) / Math.max(1, Math.min(120, tr.length));
+      let cons = null;
+      for (let end = m1.length - 1; end >= Math.max(20, m1.length - 300) && !cons; end--) {
+        let hi = m1[end].h, lo = m1[end].l, st = end;
+        while (st > 0 && Math.max(hi, m1[st - 1].h) - Math.min(lo, m1[st - 1].l) <= 3.5 * avgTR) { st--; hi = Math.max(hi, m1[st].h); lo = Math.min(lo, m1[st].l); }
+        if (end - st + 1 >= 15) cons = { t1: m1[st].t, t2: m1[end].t + 60000, hi, lo };
+      }
+      if (cons && Math.max(0, cons.lo - lastP, lastP - cons.hi) <= RNG) {
+        draws.push({ k: 'ctxcons', type: 'line', t1: cons.t1, t2: cons.t2, p: cons.lo, col: '#b9b9c2', style: 0, w: 2, label: 'Consolidation', ha: 'center', va: 'bottom' });
+      }
+      // 3) higher-timeframe manipulation candle: the latest 1H (else 4H) candle that swept away from its open
+      const manip = res.filter(r => r.f.tf !== 'NY' && r.f.start <= now && r.O != null).sort((a, b) => b.f.start - a.f.start).map(r => {
+        const c = r.ok || (r.cands || []).filter(q => q.ext != null).sort((a, b) => Math.abs(b.ext - r.O) - Math.abs(a.ext - r.O))[0];
+        return c ? { r, dir: c.dir, ext: c.ext, t: m1[c.k] ? m1[c.k].t : r.f.start } : null; }).filter(Boolean);
+      const mp = manip.find(x => x.r.f.tf === '1H') || manip[0];
+      if (mp && free(mp.ext, gap) && Math.abs(mp.ext - lastP) <= RNG) {
+        draws.push({ k: 'ctxman', type: 'line', t1: mp.r.f.start, t2: now, p: mp.ext, col: '#e8c46a', style: 1, w: 1, label: mp.r.f.tf + ' Manipulation ' + (mp.dir > 0 ? 'Low' : 'High'), ha: 'left', va: mp.dir > 0 ? 'bottom' : 'top' });
+        used.push(mp.ext);
+      }
+      // 4) unmitigated 15m RBs: box from the candle body to the end of its wick (closed candles, untouched since)
+      let m15 = H.agg(m1, 15); if (m15.length && m15.at(-1).t + 15 * 60000 > Date.now()) m15 = m15.slice(0, -1);
+      const rb = H.rbs(m15, 15).filter(z => !m1.some(x => x.t >= z.ready && (z.dir > 0 ? x.l <= z.top : x.h >= z.bot)))
+        .filter(z => Math.max(0, z.bot - lastP, lastP - z.top) <= RNG).sort((a, b) => b.t - a.t);
+      const keep = [];
+      for (const z of rb) { if (keep.length >= 4) break; if (keep.some(k => Math.min(k.top, z.top) > Math.max(k.bot, z.bot))) continue; keep.push(z); }   // no overlapping boxes
+      for (const z of keep) draws.push({ k: 'ctxrb' + z.t + z.dir, type: 'box', t1: z.t, t2: now, top: z.top, bot: z.bot, col: z.dir > 0 ? C.bull : C.bear, a: 0.12, label: '15m ' + H.dirName(z.dir) + ' RB', ha: 'right', va: z.dir > 0 ? 'bottom' : 'top' });
+    }
+
     // ---- daily + weekly bias (display only — it never changes how 23 Model finds setups)
     // ICT-style read on each timeframe: 1) last completed candle vs the one before (close beyond = continuation, sweep + close back inside = reversal),
     // 2) higher-timeframe structure, 3) draw on liquidity (which side of the last range is still untouched), 4) price vs the period's open
