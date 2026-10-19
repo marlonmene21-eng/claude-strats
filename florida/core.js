@@ -282,5 +282,117 @@ window.__claudeCore = function (TOOL) {
     hdr: (t, col) => TH ? `<div style="margin:10px 0 4px;font-weight:700;font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:${col || '#c8c8ce'}">${t}</div>`
       : `<div style="margin:6px 0 2px;font-weight:600;color:${col || '#d6dbe4'}">${t}</div>` };
 
-  tick(); timer = setInterval(tick, 30000);
+
+  // ================= 23 Model licensing / login / admin =================
+  const LIC = { url: 'https://23model.concretedigital1.workers.dev' };   // set to the Apps Script /exec URL to turn the paywall on; empty = open (current behaviour)
+  function startTool() { tick(); timer = setInterval(tick, 30000); }
+  if (!TH || !TOOL.license || !LIC.url) { startTool(); return; }
+
+  const jsonp = (params) => new Promise(res => {
+    const cb = '__lic' + Math.random().toString(36).slice(2, 9);
+    const t = setTimeout(() => { try { delete window[cb]; sc.remove(); } catch (x) { } res({ ok: false, status: 'offline', msg: 'Could not reach the server.' }); }, 12000);
+    window[cb] = d => { clearTimeout(t); try { delete window[cb]; sc.remove(); } catch (x) { } res(d); };
+    const q = Object.keys(params).map(k => k + '=' + encodeURIComponent(params[k])).join('&');
+    const sc = document.createElement('script'); sc.src = LIC.url + '?' + q + '&cb=' + cb; sc.onerror = () => window[cb]({ ok: false, status: 'offline', msg: 'Could not reach the server.' }); document.head.appendChild(sc);
+  });
+  const deviceId = () => { try { let d = localStorage.getItem('claude_lic_dev'); if (!d) { d = 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); localStorage.setItem('claude_lic_dev', d); } return d; } catch (x) { return 'd0'; } };
+  const platform = () => /tradingview/.test(location.host) ? 'TradingView' : /vest/.test(location.host) ? 'Vest' : /topstep/.test(location.host) ? 'TopstepX' : location.host;
+  const getKey = () => { try { return localStorage.getItem('claude_lickey') || ''; } catch (x) { return ''; } };
+  const setKey = k => { try { k ? localStorage.setItem('claude_lickey', k) : localStorage.removeItem('claude_lickey'); } catch (x) { } };
+  const check = k => jsonp({ action: 'check', key: k, device: deviceId(), platform: platform() });
+
+  let licUser = null, dashOn = false;
+  const bodyEl = P.querySelector('[data-b]');
+  const screen = html => { bodyEl.innerHTML = html; };
+
+  const loginScreen = (msg) => {
+    screen(`<div style="padding:10px 2px 6px;text-align:center">
+      <div style="font-weight:700;letter-spacing:2px;color:#cfcfd6;margin-bottom:10px">MEMBER ACCESS</div>
+      <input id="lic_k" placeholder="Enter your key" autocomplete="off" style="width:100%;box-sizing:border-box;text-align:center;letter-spacing:1px;font:600 13px ui-monospace,monospace;padding:11px;border-radius:12px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);color:#fff;outline:none">
+      <div id="lic_m" style="min-height:16px;margin:8px 0;font-size:11px;color:${msg && msg.err ? '#ff8a8a' : '#9ad0a0'}">${msg ? msg.t : ''}</div>
+      <button id="lic_go" style="width:100%;padding:11px;border-radius:12px;border:none;cursor:pointer;font-weight:800;letter-spacing:1px;background:linear-gradient(180deg,#fff,#d7d7dd);color:#111">UNLOCK</button>
+      <button id="lic_req" style="width:100%;margin-top:7px;padding:10px;border-radius:12px;border:1px solid rgba(255,255,255,.18);cursor:pointer;background:transparent;color:#c9c9d0;font-weight:600">Request a key</button>
+    </div>`);
+    const kin = bodyEl.querySelector('#lic_k'), mm = bodyEl.querySelector('#lic_m');
+    kin.value = getKey(); setTimeout(() => kin.focus(), 50);
+    const submit = async () => { const k = kin.value.trim(); if (!k) return; mm.style.color = '#c9c9d0'; mm.textContent = 'Checking…'; const r = await check(k); if (r.ok) { setKey(k); licUser = r; gateOk(); } else { mm.style.color = '#ff8a8a'; mm.textContent = r.msg || 'Invalid key.'; } };
+    bodyEl.querySelector('#lic_go').onclick = submit;
+    kin.onkeydown = ev => { if (ev.key === 'Enter') submit(); };
+    bodyEl.querySelector('#lic_req').onclick = requestScreen;
+  };
+  const requestScreen = () => {
+    screen(`<div style="padding:10px 2px 6px">
+      <div style="font-weight:700;letter-spacing:2px;color:#cfcfd6;text-align:center;margin-bottom:10px">REQUEST A KEY</div>
+      <label style="font-size:11px;color:#9a9aa4">Discord username</label>
+      <input id="rq_d" placeholder="yourname" style="width:100%;box-sizing:border-box;margin:3px 0 9px;padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);color:#fff;outline:none">
+      <label style="font-size:11px;color:#9a9aa4">Date you bought</label>
+      <input id="rq_b" type="date" style="width:100%;box-sizing:border-box;margin:3px 0 9px;padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);color:#fff;outline:none">
+      <div id="rq_m" style="min-height:16px;font-size:11px;color:#9ad0a0"></div>
+      <button id="rq_go" style="width:100%;padding:11px;border-radius:12px;border:none;cursor:pointer;font-weight:800;letter-spacing:1px;background:linear-gradient(180deg,#fff,#d7d7dd);color:#111">SEND REQUEST</button>
+      <button id="rq_back" style="width:100%;margin-top:7px;padding:9px;border-radius:12px;border:1px solid rgba(255,255,255,.18);cursor:pointer;background:transparent;color:#c9c9d0">Back</button>
+    </div>`);
+    const mm = bodyEl.querySelector('#rq_m');
+    bodyEl.querySelector('#rq_go').onclick = async () => { const d = bodyEl.querySelector('#rq_d').value.trim(), b = bodyEl.querySelector('#rq_b').value; if (d.length < 2) { mm.style.color = '#ff8a8a'; mm.textContent = 'Enter your Discord username.'; return; } mm.style.color = '#c9c9d0'; mm.textContent = 'Sending…'; const r = await jsonp({ action: 'signup', discord: d, bought: b }); mm.style.color = r.ok ? '#9ad0a0' : '#ff8a8a'; mm.textContent = r.msg || (r.ok ? 'Sent.' : 'Failed.'); };
+    bodyEl.querySelector('#rq_back').onclick = () => loginScreen();
+  };
+  const lockedScreen = (r) => {
+    screen(`<div style="padding:18px 6px;text-align:center">
+      <div style="font-size:30px;margin-bottom:6px">🔒</div>
+      <div style="font-weight:700;color:#fff;margin-bottom:4px">${r.status === 'expired' ? 'Subscription ended' : r.status === 'device' ? 'Key in use elsewhere' : 'Access unavailable'}</div>
+      <div style="color:#9a9aa4;font-size:12px;margin-bottom:12px">${r.msg || ''}</div>
+      <button id="lk_renew" style="padding:10px 18px;border-radius:12px;border:none;cursor:pointer;font-weight:700;background:linear-gradient(180deg,#fff,#d7d7dd);color:#111">Renew / new key</button>
+    </div>`);
+    bodyEl.querySelector('#lk_renew').onclick = () => { setKey(''); loginScreen(); };
+  };
+
+  // once a valid key is in, run the tool and add the account chip (+ admin dashboard button)
+  function gateOk() {
+    accountChip();
+    if (licUser.admin) adminButton();
+    watermark();
+    startTool();
+    setInterval(async () => { const r = await check(getKey()); if (!r.ok) { clearInterval(timer); licUser = null; lockedScreen(r); } }, 60000);
+  }
+  function accountChip() {
+    const hd = P.querySelector('[data-h]'); if (!hd || hd.querySelector('[data-acct]')) return;
+    const c = document.createElement('div'); c.dataset.acct = '1';
+    c.style.cssText = 'position:absolute;bottom:6px;left:12px;font-size:9.5px;color:#9a9aa4;letter-spacing:.3px';
+    c.textContent = licUser.admin ? 'ADMIN' : (licUser.name || 'Member') + ' · ' + licUser.daysLeft + 'd left';
+    hd.appendChild(c);
+  }
+  function watermark() {
+    if (licUser.admin) return;
+    const w = document.createElement('div');
+    w.style.cssText = 'position:absolute;inset:0;z-index:40;pointer-events:none;display:flex;align-items:center;justify-content:center;opacity:.06;font:800 20px system-ui;color:#fff;transform:rotate(-24deg);white-space:nowrap;overflow:hidden';
+    w.textContent = (licUser.name || 'member') + '  ·  ' + (licUser.name || 'member');
+    P.appendChild(w);
+  }
+  function adminButton() {
+    const add = () => { const box = P.querySelector('[data-h] [data-m="NY"]'); if (!box) return setTimeout(add, 400); const bar = box.parentElement; if (bar.querySelector('[data-dash]')) return;
+      const b = document.createElement('button'); b.dataset.dash = '1'; b.textContent = 'DASHBOARD'; b.className = ''; b.style.cssText = 'font:800 10px system-ui;letter-spacing:1px;padding:5px 9px;border-radius:10px;border:1px solid rgba(255,214,130,.5);background:rgba(255,198,92,.14);color:#ffd76e;cursor:pointer;margin-left:6px';
+      b.onclick = ev => { ev.stopPropagation(); dashOn = !dashOn; b.style.background = dashOn ? 'rgba(255,198,92,.4)' : 'rgba(255,198,92,.14)'; if (dashOn) { clearInterval(timer); renderDash(); } else { startTool(); } };
+      bar.appendChild(b); };
+    add();
+  }
+  async function renderDash() {
+    if (!dashOn) return;
+    screen('<div style="padding:16px;text-align:center;color:#9a9aa4">Loading dashboard…</div>');
+    const r = await jsonp({ action: 'admin', s: getKey() });
+    if (!dashOn) return;
+    if (!r.ok) { screen('<div style="padding:16px;color:#ff8a8a">Admin only.</div>'); return; }
+    const chip = (lab, val, col) => `<div style="flex:1;min-width:70px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:8px 10px"><div style="font-size:9px;color:#8a8a92;text-transform:uppercase;letter-spacing:.5px">${lab}</div><div style="font:800 17px system-ui;color:${col}">${val}</div></div>`;
+    const stcol = s => s === 'active' ? '#5fe0a1' : s === 'pending' ? '#e8c46a' : '#ff8a8a';
+    const abtn = (k, what, lab, col, extra) => `<button data-k="${k}" data-what="${what}"${extra || ''} style="font:700 10px system-ui;padding:3px 7px;margin:2px 3px 0 0;border-radius:7px;border:1px solid ${col};background:transparent;color:${col};cursor:pointer">${lab}</button>`;
+    const rows = r.users.map(u => `<div style="padding:7px 0;border-bottom:1px solid rgba(255,255,255,.07)">
+      <div style="display:flex;justify-content:space-between;align-items:center"><span style="color:#ececf0;font-weight:600">${u.online ? '🟢 ' : ''}${u.discord || '(no name)'}</span><span style="color:${stcol(u.status)};font-size:11px;font-weight:700">${u.status}${u.status === 'active' ? ' · ' + u.daysLeft + 'd' : ''}</span></div>
+      <div style="color:#7e7e88;font-size:10px;margin:1px 0 2px">${u.key} · ${u.platform || '—'}${u.bought ? ' · bought ' + u.bought : ''}</div>
+      <div>${u.status === 'pending' ? abtn(u.key, 'approve', 'Approve', '#5fe0a1') + abtn(u.key, 'deny', 'Deny', '#ff8a8a') : abtn(u.key, 'extend', '+30d', '#8fb4ff') + (u.status === 'revoked' ? abtn(u.key, 'unban', 'Unban', '#5fe0a1') : abtn(u.key, 'ban', 'Ban', '#ff8a8a')) + (u.device ? abtn(u.key, 'reset', 'Reset device', '#b0b0b8') : '')}</div>
+    </div>`).join('');
+    screen(`<div style="display:flex;gap:6px;margin-bottom:10px">${chip('Online', r.online, '#5fe0a1')}${chip('Active', r.active, '#fff')}${chip('Pending', r.pending, '#e8c46a')}${chip('Revenue', '$' + r.revenue, '#5fe0a1')}</div>
+      <div style="font-weight:700;font-size:10.5px;letter-spacing:1px;color:#c8c8ce;margin-bottom:4px">USERS</div>${rows || '<div style="color:#8a8a92">No users yet.</div>'}`);
+    bodyEl.querySelectorAll('[data-what]').forEach(btn => btn.onclick = async () => { btn.textContent = '…'; let days = ''; if (btn.dataset.what === 'approve' || btn.dataset.what === 'extend') days = '&days=30'; await jsonp({ action: 'act', s: getKey(), key: btn.dataset.k, what: btn.dataset.what }); renderDash(); });
+  }
+
+  // boot the gate
+  (async () => { const k = getKey(); if (!k) { loginScreen(); return; } const r = await check(k); if (r.ok) { licUser = r; gateOk(); } else { loginScreen({ t: r.msg || '', err: true }); } })();
 };
