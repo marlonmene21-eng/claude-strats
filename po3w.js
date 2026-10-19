@@ -133,12 +133,16 @@ box-shadow:0 22px 50px rgba(0,0,0,.55),inset 0 0 40px rgba(110,70,20,.35)!import
       if (o830 && o830.t < f.start) tl.push({ name: '8:30 Open', p: o830.o });
       for (const p of lv) { if (p.side !== dir) continue; const tk = H.takenAt(allB, p.p, dir, (p.t || 0) + 1); if (!tk || tk > cs.t) tl.push(p); }
       const beyond = n => tl.filter(p => dir > 0 ? p.p >= entry + n * R : p.p <= entry - n * R).sort((a, b) => dir * (a.p - b.p))[0];
-      const t1 = beyond(1) || { name: '1R', p: entry + dir * R }, t2 = beyond(2) || { name: '2R', p: entry + dir * 2 * R };
+      let t1 = beyond(1) || { name: '1R', p: entry + dir * R }, t2 = beyond(2) || { name: '2R', p: entry + dir * 2 * R };
       // stop-loss cap (backtested Sept 11 – Oct 15: same win rate, ~2.6x the profit on wide-stop trades): never risk more than 50 pts on NQ
       const CAP = /NQ|NDX|NAS/.test((e.sym || '').toUpperCase()) ? 50 : entry * 50 / 30000, stop0 = stop;
       if (R > CAP) { stop = H.rt(e, entry - dir * CAP); R = Math.abs(entry - stop); if (t1.name === '1R') t1.p = entry + dir * R; if (t2.name === '2R') t2.p = entry + dir * 2 * R; }
+      // quiet hours (backtested Sept 3 – Oct 16): low-volatility 1H candles rarely expand, so use a tighter stop and closer, realistic targets.
+      // Same entries; stop = 0.6x the structure risk, TP1 = 0.5x, TP2 = 1.0x, breakeven at TP1. Turned 175 trades from −367 to +478 pts.
+      const capped = Math.abs(entry - stop0) > CAP, QH = [4, 5, 8, 18, 21, 22, 23], qh = f.tf === '1H' && QH.includes(Math.floor(etp(f.start).mins / 60)), R0 = R;
+      if (qh) { stop = H.rt(e, entry - dir * 0.6 * R0); R = Math.abs(entry - stop); t1 = { name: 'Quiet-hour TP1', p: H.rt(e, entry + dir * 0.5 * R0) }; t2 = { name: 'Quiet-hour TP2', p: H.rt(e, entry + dir * 1.0 * R0) }; }
       let st = 'pending', fillT = null, tp1 = false, be = false, sl = stop;
-      const beAt = entry + dir * 0.75 * R;   // breakeven rule (backtested): once price runs 0.75R in your favour, the stop moves to entry
+      const beAt = qh ? t1.p : entry + dir * 0.75 * R;   // breakeven rule (backtested): once price runs 0.75R in your favour, the stop moves to entry
       for (let j = fv.i + 1; j < m1.length; j++) {
         const x = m1[j];
         if (st === 'pending') {
@@ -154,7 +158,7 @@ box-shadow:0 22px 50px rgba(0,0,0,.55),inset 0 0 40px rgba(110,70,20,.35)!import
       }
       if (st === 'pending' && now >= f.end) st = 'expired';
       if ((st === 'pending' || st === 'active') && now - m1[fv.i].t > 3600e3) st = 'cleared (1h old)';   // wipe trades an hour after they were posted
-      return { f, st, O, ok, fv, entry, stop, stop0, R, t1, t2, tp1, fillT, be, beAt };
+      return { f, st, O, ok, fv, entry, stop, stop0, R, t1, t2, tp1, fillT, be, beAt, qh, capped };
     }
 
     const res = frames.map(evalFrame);
@@ -169,7 +173,7 @@ box-shadow:0 22px 50px rgba(0,0,0,.55),inset 0 0 40px rgba(110,70,20,.35)!import
       draws.push({ k: id + 'fvg', type: 'box', t1: r.fv.t, t2: now, top: r.fv.top, bot: r.fv.bot, col, ext: true, label: '1m ' + H.dirName(d) + ' FVG' });
       draws.push({ k: id + 'cisd', type: 'line', t1: r.ok.cs.sT, t2: r.ok.cs.t + 60000, p: r.ok.cs.lvl, col, style: 2, label: '1m ' + H.dirName(d) + ' CISD' });
       draws.push({ k: id + 'en', type: 'line', t1: r.fv.t, p: r.entry, col: C.entry, w: 2, label: k + ' 23 Model Entry' });
-      draws.push({ k: id + 'sl' + (r.be ? 'be' : ''), type: 'line', t1: r.fv.t, p: r.be ? r.entry : r.stop, col: C.sl, w: 2, label: k + ' 23 Model SL' + (r.be ? ' (BE)' : r.stop0 !== r.stop ? ' (50 cap)' : '') });
+      draws.push({ k: id + 'sl' + (r.be ? 'be' : ''), type: 'line', t1: r.fv.t, p: r.be ? r.entry : r.stop, col: C.sl, w: 2, label: k + ' 23 Model SL' + (r.be ? ' (BE)' : r.capped ? ' (50 cap)' : '') });
       draws.push({ k: id + 't1', type: 'line', t1: r.fv.t, p: r.t1.p, col: C.tp, label: k + ' 23 Model TP1' });
       draws.push({ k: id + 't2', type: 'line', t1: r.fv.t, p: r.t2.p, col: C.tp, w: 2, label: k + ' 23 Model TP2' });
     }
@@ -272,7 +276,7 @@ box-shadow:0 22px 50px rgba(0,0,0,.55),inset 0 0 40px rgba(110,70,20,.35)!import
     for (const r of live) {
       const d = r.ok.dir, col = d > 0 ? C.bull : C.bear;
       let t = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><span style="font-size:15px;font-weight:800;color:${col}">${d > 0 ? 'LONG' : 'SHORT'}</span><span style="font-size:10px;padding:2px 8px;border-radius:10px;background:${r.st === 'active' ? 'rgba(95,224,161,.15)' : 'rgba(232,196,106,.14)'};color:${r.st === 'active' ? '#5fe0a1' : '#e8c46a'}">${r.st === 'active' ? 'IN TRADE' : 'WAITING FOR FILL'}</span></div>`;
-      t += H.row('Entry', H.fmt(e, r.entry), C.entry) + (r.be ? H.row('Stop · moved to BE', H.fmt(e, r.entry), '#e8c46a') : '') + H.row((r.be ? 'Original stop' : 'Stop') + (r.stop0 !== r.stop ? ' · 50 cap' : ''), H.fmt(e, r.stop) + (r.stop0 !== r.stop ? ` <span style="color:#a8a8b0;font-size:10.5px">(was ${H.fmt(e, r.stop0)})</span>` : ''), C.sl);
+      t += H.row('Entry', H.fmt(e, r.entry), C.entry) + (r.be ? H.row('Stop · moved to BE', H.fmt(e, r.entry), '#e8c46a') : '') + H.row((r.be ? 'Original stop' : 'Stop') + (r.capped ? ' · 50 cap' : ''), H.fmt(e, r.stop) + (r.capped ? ` <span style="color:#a8a8b0;font-size:10.5px">(was ${H.fmt(e, r.stop0)})</span>` : ''), C.sl);
       t += H.row('TP1 · ' + r.t1.name, H.fmt(e, r.t1.p) + (r.tp1 ? ' ✓' : ''), C.tp) + H.row('TP2 · ' + r.t2.name, H.fmt(e, r.t2.p), C.tp);
       t += H.row('R:R to TP2', (Math.abs(r.t2.p - r.entry) / r.R).toFixed(1) + 'R');
       html += H.card(r.f.name, t);
@@ -283,8 +287,9 @@ box-shadow:0 22px 50px rgba(0,0,0,.55),inset 0 0 40px rgba(110,70,20,.35)!import
       if (r.ok.swept.length) cf += pt(col, 'Liquidity swept', r.ok.swept.join(' · '));
       cf += pt(col, '1m ' + H.dirName(d) + ' CISD', H.fmt(e, r.ok.cs.lvl) + ' @ ' + hhmm(r.ok.cs.t));
       cf += pt(col, '1m ' + H.dirName(d) + ' FVG (entry)', H.fmt(e, r.fv.bot) + ' – ' + H.fmt(e, r.fv.top));
-      if (r.stop0 !== r.stop) cf += pt(C.sl, 'Stop capped at 50 pts', 'Structure stop was ' + H.fmt(e, r.stop0) + ' (' + H.fmt(e, Math.abs(r.entry - r.stop0)) + ' pts)');
-      cf += pt(r.be ? '#e8c46a' : '#77777f', r.be ? 'Stop moved to breakeven' : 'Breakeven at ' + H.fmt(e, r.beAt), r.be ? 'Price ran 0.75R in your favour — risk is off' : 'Stop moves to entry once price reaches 0.75R');
+      if (r.qh) cf += pt('#e8c46a', 'Quiet-hour adjustment', 'Low-volatility hour: tighter stop (0.6x), TP1 0.5x, TP2 1.0x, breakeven at TP1');
+      if (r.capped) cf += pt(C.sl, 'Stop capped at 50 pts', 'Structure stop was ' + H.fmt(e, r.stop0) + ' (' + H.fmt(e, Math.abs(r.entry - r.stop0)) + ' pts)');
+      cf += pt(r.be ? '#e8c46a' : '#77777f', r.be ? 'Stop moved to breakeven' : 'Breakeven at ' + H.fmt(e, r.beAt), r.be ? (r.qh ? 'TP1 hit — risk is off' : 'Price ran 0.75R in your favour — risk is off') : (r.qh ? 'Stop moves to entry once TP1 is hit' : 'Stop moves to entry once price reaches 0.75R'));
       cf += pt(C.tp, 'Targets', 'TP1 ' + r.t1.name + ' · TP2 ' + r.t2.name);
       cf += pt(bias === d ? C.bull : bias ? C.bear : '#77777f', bias === d ? 'With the daily bias' : bias ? 'Against the daily bias' : 'Daily bias neutral', '');
       html += H.card('Confluences used', cf);
